@@ -1,41 +1,19 @@
 {
-  "name": "@spacevision-ai/release-toolkit",
-  "version": "0.0.0-development",
-  "description": "SpaceVision 공용 릴리즈 자동화 toolkit — semantic-release scripts, config base, reusable workflow",
+  "name": "@spacevision-ai/release-toolkit-monorepo",
+  "version": "0.0.0",
+  "description": "SpaceVision 공용 릴리즈 자동화 toolkit monorepo",
   "license": "UNLICENSED",
-  "private": false,
+  "private": true,
   "type": "module",
-  "files": [
-    "scripts",
-    "config",
-    "README.md"
-  ],
-  "exports": {
-    "./config/releaserc-base": "./config/releaserc-base.cjs",
-    "./config/releaserc-preview-base": "./config/releaserc-preview-base.cjs",
-    "./config/commitlint-base": "./config/commitlint-base.cjs"
-  },
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "pnpm -r test",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish"
   },
   "devDependencies": {
-    "@commitlint/cli": "19.5.0",
-    "@commitlint/config-conventional": "19.5.0",
-    "@semantic-release/changelog": "6.0.3",
-    "@semantic-release/commit-analyzer": "13.0.0",
-    "@semantic-release/exec": "6.0.3",
-    "@semantic-release/git": "10.0.1",
-    "@semantic-release/github": "11.0.0",
-    "@semantic-release/npm": "12.0.1",
-    "@semantic-release/release-notes-generator": "14.0.1",
-    "conventional-changelog-conventionalcommits": "8.0.0",
-    "semantic-release": "24.1.2",
+    "@changesets/cli": "2.27.9",
     "vitest": "2.1.4"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
-    "access": "restricted"
   },
   "engines": {
     "node": ">=18.20.0"

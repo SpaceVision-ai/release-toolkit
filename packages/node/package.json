@@ -1,0 +1,62 @@
+{
+  "name": "@spacevision-ai/release-toolkit-node",
+  "version": "0.0.0-development",
+  "description": "Node/pnpm 레포용 릴리즈 자동화 sub-package — semantic-release·commitlint base + PR 미리보기 스크립트",
+  "license": "UNLICENSED",
+  "type": "module",
+  "files": [
+    "config",
+    "scripts",
+    "README.md"
+  ],
+  "exports": {
+    "./config/releaserc-base": "./config/releaserc-base.cjs",
+    "./config/releaserc-preview-base": "./config/releaserc-preview-base.cjs",
+    "./config/commitlint-base": "./config/commitlint-base.cjs",
+    "./scripts/preview-release.mjs": "./scripts/preview-release.mjs"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SpaceVision-ai/release-toolkit.git",
+    "directory": "packages/node"
+  },
+  "dependencies": {
+    "@spacevision-ai/release-toolkit-core": "workspace:^"
+  },
+  "peerDependencies": {
+    "@commitlint/cli": "^19",
+    "@commitlint/config-conventional": "^19",
+    "@semantic-release/changelog": "^6",
+    "@semantic-release/commit-analyzer": "^13",
+    "@semantic-release/exec": "^6",
+    "@semantic-release/git": "^10",
+    "@semantic-release/github": "^11",
+    "@semantic-release/npm": "^12",
+    "@semantic-release/release-notes-generator": "^14",
+    "conventional-changelog-conventionalcommits": "^8",
+    "semantic-release": "^24"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "19.5.0",
+    "@commitlint/config-conventional": "19.5.0",
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "13.0.0",
+    "@semantic-release/exec": "6.0.3",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/github": "11.0.0",
+    "@semantic-release/npm": "12.0.1",
+    "@semantic-release/release-notes-generator": "14.0.1",
+    "conventional-changelog-conventionalcommits": "8.0.0",
+    "semantic-release": "24.1.2"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "engines": {
+    "node": ">=18.20.0"
+  }
+}
