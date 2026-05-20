@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.log
+coverage/
+.env
+.env.local
+dist/
+.vitest-cache/
+.idea/
+.vscode/
+commit_message.md
