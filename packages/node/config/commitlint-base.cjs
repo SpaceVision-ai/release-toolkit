@@ -1,5 +1,5 @@
-// SpaceVision 자동 릴리즈 commitlint 베이스.
-// 자식 레포는 require('@spacevision-ai/release-toolkit/config/commitlint-base') 후
+// SpaceVision Node·pnpm 레포 commitlint 베이스.
+// 자식 레포는 require('@spacevision-ai/release-toolkit-node/config/commitlint-base') 후
 // 필요 시 추가 ignore 패턴이나 rules 확장.
 module.exports = {
   extends: ["@commitlint/config-conventional"],

@@ -56,10 +56,10 @@ describe("config base", () => {
       );
     });
 
-    it("points exec.successCmd at the toolkit npm package path", () => {
+    it("points exec.successCmd at the toolkit core npm package path", () => {
       const exec = findPlugin(base, "@semantic-release/exec");
       expect(exec.successCmd).toContain(
-        "node_modules/@spacevision-ai/release-toolkit/scripts/polish-release-notes.mjs",
+        "node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs",
       );
       expect(exec.successCmd).toContain("${nextRelease.gitTag}");
     });

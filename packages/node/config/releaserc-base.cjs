@@ -1,5 +1,5 @@
-// SpaceVision 자동 릴리즈 공용 베이스.
-// 자식 레포는 require('@spacevision-ai/release-toolkit/config/releaserc-base') 후
+// SpaceVision Node·pnpm 레포 자동 릴리즈 베이스.
+// 자식 레포는 require('@spacevision-ai/release-toolkit-node/config/releaserc-base') 후
 // branches, tagFormat, @semantic-release/git assets 등을 override한다.
 module.exports = {
   branches: ["release"],
@@ -79,11 +79,11 @@ module.exports = {
     [
       "@semantic-release/exec",
       {
-        // pnpm/yarn 의 flat node_modules 하위에서 toolkit 패키지를 찾는 경로.
+        // pnpm/yarn 의 flat node_modules 하위에서 core 패키지를 찾는 경로.
         // 자식 레포가 isolated 모드라도 pnpm은 동일 경로에 symlink를 만들어주므로 호환된다.
         // ${nextRelease.gitTag}는 semantic-release의 런타임 보간 토큰이며 JS 문자열의 일부.
         successCmd:
-          "node node_modules/@spacevision-ai/release-toolkit/scripts/polish-release-notes.mjs ${nextRelease.gitTag}",
+          "node node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs ${nextRelease.gitTag}",
       },
     ],
   ],

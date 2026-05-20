@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
-// 자식 레포의 node_modules/@spacevision-ai/release-toolkit/scripts/ 에서 실행될 때
+// 자식 레포의 node_modules/@spacevision-ai/release-toolkit-node/scripts/ 에서 실행될 때
 // 호출 시점 cwd(=자식 레포 루트)의 .releaserc.cjs를 읽어야 한다.
 // 단순 '../.releaserc.cjs'는 toolkit 패키지 내부 경로로 해석되어 잘못된 파일을 가리킨다.
 const config = require(resolve(process.cwd(), ".releaserc.cjs"));
