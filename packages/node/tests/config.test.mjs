@@ -92,6 +92,14 @@ describe("config base", () => {
       expect(types.indexOf("hotfix")).toBeLessThan(types.indexOf("fix"));
     });
 
+    it("type-enum is synthesised from core conventions including lint-only types", () => {
+      const types = cl.rules["type-enum"][2];
+      expect(types).toContain("feat");
+      expect(types).toContain("hotfix");
+      // lintOnlyTypes 도 type-enum 에 합쳐져야 한다 (revert 가 합성에서 빠지지 않았는지 회귀 방어).
+      expect(types).toContain("revert");
+    });
+
     it("ignores Merge and chore(release) commits without misfiring", () => {
       const matches = (subject) =>
         cl.ignores.some((predicate) => predicate(subject));

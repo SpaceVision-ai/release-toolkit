@@ -1,50 +1,34 @@
 // SpaceVision Node·pnpm 레포 자동 릴리즈 베이스.
 // 자식 레포는 require('@spacevision-ai/release-toolkit-node/config/releaserc-base') 후
 // branches, tagFormat, @semantic-release/git assets 등을 override한다.
+//
+// types·sections는 core/conventions에서 변환되어 들어오므로 새 commit type을 추가하려면
+// packages/core/conventions.cjs 한 곳만 수정하면 node가 자동으로 따라온다.
+const { types } = require("@spacevision-ai/release-toolkit-core/conventions");
+
+const releaseRules = [
+  { breaking: true, release: "major" },
+  ...types.map((t) => ({ type: t.type, release: t.release })),
+];
+
+const presetConfigTypes = types.map((t) => ({
+  type: t.type,
+  section: t.section,
+  hidden: false,
+}));
+
 module.exports = {
   branches: ["release"],
   plugins: [
     [
       "@semantic-release/commit-analyzer",
-      {
-        preset: "conventionalcommits",
-        releaseRules: [
-          { breaking: true, release: "major" },
-          { type: "feat", release: "minor" },
-          { type: "hotfix", release: "patch" },
-          { type: "fix", release: "patch" },
-          { type: "perf", release: "patch" },
-          { type: "refactor", release: "patch" },
-          { type: "docs", release: "patch" },
-          { type: "style", release: "patch" },
-          { type: "test", release: "patch" },
-          { type: "build", release: "patch" },
-          { type: "ci", release: "patch" },
-          { type: "chore", release: "patch" },
-          // revert는 conventional-commits preset이 자체적으로 분석해 "Reverts"
-          // 섹션과 patch bump를 처리하므로 여기 명시하지 않는다.
-        ],
-      },
+      { preset: "conventionalcommits", releaseRules },
     ],
     [
       "@semantic-release/release-notes-generator",
       {
         preset: "conventionalcommits",
-        presetConfig: {
-          types: [
-            { type: "feat", section: "✨ 신규 기능", hidden: false },
-            { type: "hotfix", section: "🚨 핫픽스", hidden: false },
-            { type: "fix", section: "🐛 버그 수정", hidden: false },
-            { type: "perf", section: "⚡ 성능 개선", hidden: false },
-            { type: "refactor", section: "♻️ 리팩토링", hidden: false },
-            { type: "docs", section: "📚 문서", hidden: false },
-            { type: "style", section: "💄 스타일", hidden: false },
-            { type: "test", section: "✅ 테스트", hidden: false },
-            { type: "build", section: "🔨 빌드", hidden: false },
-            { type: "ci", section: "🔧 CI/CD", hidden: false },
-            { type: "chore", section: "🧹 잡무", hidden: false },
-          ],
-        },
+        presetConfig: { types: presetConfigTypes },
       },
     ],
     [
