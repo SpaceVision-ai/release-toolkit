@@ -1,0 +1,157 @@
+name: Release (Node, reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        type: string
+        default: "22"
+        description: "Node.js version to install."
+      pnpm_version:
+        type: string
+        default: ""
+        description: "Optional pinned pnpm version. Empty = use packageManager from package.json."
+      run_lint:
+        type: boolean
+        default: false
+      run_test:
+        type: boolean
+        default: false
+      lint_command:
+        type: string
+        default: "pnpm lint"
+      test_command:
+        type: string
+        default: "pnpm test"
+      sync_to_main:
+        type: boolean
+        default: true
+        description: "After release, fast-forward main from release branch."
+      back_merge_to_develop:
+        type: boolean
+        default: true
+        description: "After main sync, back-merge main into develop."
+      trigger_deploy_workflow:
+        type: string
+        default: ""
+        description: "Workflow file name (e.g. deploy-prod.yml) to dispatch on main after sync. Empty = skip."
+      trigger_dev_deploy_workflow:
+        type: string
+        default: ""
+        description: "Workflow file name to dispatch on develop after back-merge. Empty = skip."
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: read
+  actions: write
+
+jobs:
+  release:
+    # github.event.head_commit은 push 트리거에서만 존재한다. release 브랜치 push가 정상 호출자이므로 보통은 채워진다.
+    # workflow_dispatch 등 다른 트리거로 호출되면 표현식이 null이 되어 가드가 무력화되지만, release 흐름 자체는 깨지지 않는다.
+    if: ${{ !contains(github.event.head_commit.message, 'skip ci') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm_version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: "pnpm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@spacevision-ai"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lint
+        if: ${{ inputs.run_lint }}
+        env:
+          LINT_COMMAND: ${{ inputs.lint_command }}
+        run: bash -lc "$LINT_COMMAND"
+
+      - name: Test
+        if: ${{ inputs.run_test }}
+        env:
+          TEST_COMMAND: ${{ inputs.test_command }}
+        run: bash -lc "$TEST_COMMAND"
+
+      - name: Strict commit check
+        run: |
+          # 마지막 자동 릴리즈 커밋을 baseline으로 사용. baseline이 없으면 strict 검사를 건너뛴다.
+          LAST_RELEASE=$(git log --format=%H --grep='^chore(release):' -1 || echo "")
+          if [ -z "$LAST_RELEASE" ]; then
+            echo "No prior auto-release commit found — skipping strict check (legacy commits)"
+          else
+            echo "Checking commits in $LAST_RELEASE..HEAD"
+            pnpm exec commitlint --from "$LAST_RELEASE" --to HEAD --verbose
+          fi
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+          HUSKY: "0"
+        run: pnpm exec semantic-release
+
+      - name: Sync release → main
+        if: ${{ inputs.sync_to_main }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          git fetch origin
+          git checkout main 2>/dev/null || git checkout -b main origin/main
+          git merge origin/release --no-edit
+          git push origin main
+
+      - name: Trigger deploy workflow (after main sync)
+        if: ${{ inputs.sync_to_main && inputs.trigger_deploy_workflow != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_WORKFLOW: ${{ inputs.trigger_deploy_workflow }}
+        run: gh workflow run "$DEPLOY_WORKFLOW" --ref main --repo ${{ github.repository }}
+
+      - name: Back-merge main → develop
+        if: ${{ inputs.back_merge_to_develop }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin
+          git checkout develop 2>/dev/null || git checkout -b develop origin/develop
+          git merge origin/main --no-edit
+          git push origin develop
+
+      - name: Trigger dev deploy workflow (after develop sync)
+        if: ${{ inputs.back_merge_to_develop && inputs.trigger_dev_deploy_workflow != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEV_DEPLOY_WORKFLOW: ${{ inputs.trigger_dev_deploy_workflow }}
+        run: gh workflow run "$DEV_DEPLOY_WORKFLOW" --ref develop --repo ${{ github.repository }}
