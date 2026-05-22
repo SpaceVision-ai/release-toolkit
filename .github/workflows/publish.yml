@@ -1,0 +1,112 @@
+name: Publish
+
+on:
+  push:
+    branches: [release]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: write
+
+jobs:
+  publish:
+    if: ${{ !contains(github.event.head_commit.message, 'skip ci') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@spacevision-ai"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm -r test
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Apply changesets versions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec changeset version
+
+      - name: Commit version bumps to release branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "chore(release): apply changeset version bumps [skip ci]"
+            git push origin HEAD:release
+          else
+            echo "No version changes to commit (changesets applied no-op)"
+          fi
+
+      - name: Publish to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec changeset publish
+
+      - name: Move major tag (v0/v1/…)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # changesets publish가 만든 가장 최신 sub-package tag에서 major 추출.
+          # tag 형식이 "@scope/pkg@1.2.3" 또는 "v1.2.3" 등으로 다양해 첫 번째로 매칭되는
+          # X.Y.Z 패턴의 major(X)를 추출한다. 모든 sub-package가 major 동기화되어 있다고 가정.
+          LATEST_TAG=$(git tag --sort=-v:refname --merged HEAD | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No tag found, skipping major tag move."
+            exit 0
+          fi
+          MAJOR=$(echo "$LATEST_TAG" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -d. -f1)
+          if [ -z "$MAJOR" ]; then
+            echo "Could not parse major from $LATEST_TAG, skipping."
+            exit 0
+          fi
+          MAJOR_TAG="v${MAJOR}"
+          echo "Moving ${MAJOR_TAG} to point at HEAD (${LATEST_TAG})"
+          git tag -f "${MAJOR_TAG}" HEAD
+          git push origin "${MAJOR_TAG}" --force
+
+      - name: Sync release → main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin
+          git checkout main 2>/dev/null || git checkout -b main origin/main
+          git merge origin/release --no-edit
+          git push origin main
+
+      - name: Back-merge main → develop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin
+          git checkout develop 2>/dev/null || git checkout -b develop origin/develop
+          git merge origin/main --no-edit
+          git push origin develop
