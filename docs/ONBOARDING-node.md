@@ -97,17 +97,19 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  packages: read
-  actions: write
+  packages: read   # @spacevision-ai/* toolkit 패키지 install에 필요
 jobs:
   release:
     if: ${{ !contains(github.event.head_commit.message, 'skip ci') }}
-    uses: SpaceVision-ai/release-toolkit/.github/workflows/release-node.yml@v0
-    with:
-      run_test: true
-      trigger_deploy_workflow: deploy-prod.yml
-      trigger_dev_deploy_workflow: deploy-dev.yml
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: SpaceVision-ai/release-toolkit/actions/release-node@v0
+        with:
+          pnpm_version: '10.33.0'   # 생략 가능 (packageManager 필드 사용)
+          run_lint: 'true'           # 필요 시
+          run_test: 'true'           # 필요 시
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
 `.github/workflows/pr-preview.yml`:
@@ -118,15 +120,24 @@ on:
   pull_request:
     branches: [release]
     types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+  packages: read   # @spacevision-ai/* toolkit 패키지 install에 필요
 jobs:
   preview:
-    uses: SpaceVision-ai/release-toolkit/.github/workflows/pr-preview-node.yml@v0
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: SpaceVision-ai/release-toolkit/actions/pr-preview-node@v0
+        with:
+          pnpm_version: '10.33.0'   # 생략 가능
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
 **`@v0`** 은 toolkit이 0.x 동안 따라가는 major tag. toolkit이 1.0.0을 끊으면 `@v1`로 교체.
 
-**concurrency**: reusable workflow는 호출자에 concurrency를 강제할 수 없으므로 wrapper에 반드시 직접 선언한다. 위 예시의 `concurrency.group: release`가 그 역할.
+**`packages: read`**: GITHUB_TOKEN이 GitHub Packages에서 `@spacevision-ai/*` 패키지를 install하려면 반드시 필요. 없으면 403 Forbidden 발생.
 
 ## 3. 로컬 개발자 1회 셋업
 
