@@ -250,15 +250,15 @@ try {
 const contributorRange = previousTag ? `${previousTag}..HEAD` : "HEAD";
 let contributors = [];
 const githubToken = process.env.GITHUB_TOKEN;
+const [owner, repoName] = (process.env.GITHUB_REPOSITORY ?? "/").split("/");
 
 if (githubToken && owner && repoName) {
   // commit SHA 목록 추출
   let shas = [];
   try {
-    shas = execSync(
-      `git log ${contributorRange} --format="%H" --no-merges`,
-      { encoding: "utf-8" },
-    )
+    shas = execSync(`git log ${contributorRange} --format="%H" --no-merges`, {
+      encoding: "utf-8",
+    })
       .trim()
       .split("\n")
       .filter(Boolean);
@@ -292,7 +292,9 @@ if (githubToken && owner && repoName) {
 
   contributors = [...logins];
   if (!contributors.length) {
-    console.warn(`[polish] No contributors found via GitHub API for range ${contributorRange}.`);
+    console.warn(
+      `[polish] No contributors found via GitHub API for range ${contributorRange}.`,
+    );
   }
 } else {
   // GITHUB_TOKEN 없을 때 fallback: git author name
@@ -306,7 +308,9 @@ if (githubToken && owner && repoName) {
       .filter(Boolean);
     contributors = [...new Set(names)];
     if (!contributors.length) {
-      console.warn(`[polish] No contributors found in range ${contributorRange}.`);
+      console.warn(
+        `[polish] No contributors found in range ${contributorRange}.`,
+      );
     }
   } catch (err) {
     console.warn(`[polish] Failed to read contributors: ${err.message}`);
@@ -315,7 +319,6 @@ if (githubToken && owner && repoName) {
 
 const formatContributor = (login) => `@${login}`;
 
-const [owner, repoName] = (process.env.GITHUB_REPOSITORY ?? "/").split("/");
 const footerLines = [];
 if (previousTag && owner && repoName) {
   footerLines.push(
