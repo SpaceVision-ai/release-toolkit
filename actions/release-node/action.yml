@@ -65,6 +65,7 @@ runs:
         mkdir -p node_modules/@spacevision-ai
         ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
         ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
+        node -e "const fs=require('fs'),f='node_modules/@spacevision-ai/release-toolkit-core/package.json',p=JSON.parse(fs.readFileSync(f,'utf8'));delete p.type;fs.writeFileSync(f,JSON.stringify(p))"
 
     - name: Lint
       if: ${{ inputs.run_lint == 'true' }}

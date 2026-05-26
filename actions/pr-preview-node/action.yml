@@ -42,11 +42,11 @@ runs:
     - name: Link release-toolkit from action repository (no install needed)
       shell: bash
       run: |
-        # GitHub Actions가 composite action 로드 시 toolkit 레포를 이미 로컬에 다운로드한다.
-        # npm install/GitHub Packages 인증 없이 GITHUB_ACTION_PATH로 직접 symlink를 만든다.
         mkdir -p node_modules/@spacevision-ai
         ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
         ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
+        # core/package.json의 "type":"module" 제거: CJS require() 호환을 위해.
+        node -e "const fs=require('fs'),f='node_modules/@spacevision-ai/release-toolkit-core/package.json',p=JSON.parse(fs.readFileSync(f,'utf8'));delete p.type;fs.writeFileSync(f,JSON.stringify(p))"
 
     - name: Compute release preview (deterministic)
       id: deterministic
