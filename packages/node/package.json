@@ -1,6 +1,6 @@
 {
   "name": "@spacevision-ai/release-toolkit-node",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Node/pnpm 레포용 릴리즈 자동화 sub-package — semantic-release·commitlint base + PR 미리보기 스크립트",
   "license": "UNLICENSED",
   "type": "module",
