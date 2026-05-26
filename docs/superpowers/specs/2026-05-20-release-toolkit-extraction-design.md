@@ -1,3 +1,9 @@
+> **⚠️ Superseded by [2026-05-20-release-toolkit-multi-language-redesign.md](./2026-05-20-release-toolkit-multi-language-redesign.md)**
+>
+> 이 spec은 toolkit을 Node·pnpm 단일 stack 전용으로 설계했다. 88개 레포가 다양한 stack을 운영한다는 사실이 brainstorming 도중 재확인되면서 multi-language monorepo 재설계로 대체되었다. 본문은 history로 보존된다.
+
+---
+
 # Release Toolkit 추출 설계
 
 작성일: 2026-05-20

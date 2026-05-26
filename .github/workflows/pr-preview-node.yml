@@ -46,6 +46,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install release-toolkit (CI-only, not in child repo lockfile)
+        run: pnpm add @spacevision-ai/release-toolkit-node --ignore-workspace-root-check
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Compute release preview (deterministic)
         id: deterministic
         env:

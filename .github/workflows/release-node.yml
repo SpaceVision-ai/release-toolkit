@@ -81,6 +81,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install release-toolkit (CI-only, not in child repo lockfile)
+        # 자식 레포는 toolkit을 devDependency에 추가하지 않으므로 lockfile에 없다.
+        # semantic-release 실행 시 .releaserc.cjs가 toolkit을 require하므로 여기서 별도 설치.
+        run: pnpm add @spacevision-ai/release-toolkit-node --ignore-workspace-root-check
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Lint
         if: ${{ inputs.run_lint }}
         env:

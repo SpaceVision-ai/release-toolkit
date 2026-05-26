@@ -1,3 +1,9 @@
+> **⚠️ Superseded by [2026-05-20-release-toolkit-multi-language-setup.md](./2026-05-20-release-toolkit-multi-language-setup.md)**
+>
+> 이 plan은 단일 Node 패키지 toolkit을 가정한 첫 spec의 구현 계획이다. multi-language 재설계로 spec이 대체되면서 이 plan도 supersede된다. 본문은 history로 보존된다.
+
+---
+
 # Release Toolkit 셋업 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
