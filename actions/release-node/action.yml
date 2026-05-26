@@ -55,6 +55,12 @@ runs:
         registry-url: "https://npm.pkg.github.com"
         scope: "@spacevision-ai"
 
+    - name: Configure GitHub Packages auth
+      shell: bash
+      run: |
+        echo "//npm.pkg.github.com/:_authToken=${{ inputs.github_token }}" >> ~/.npmrc
+        echo "@spacevision-ai:registry=https://npm.pkg.github.com" >> ~/.npmrc
+
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile
