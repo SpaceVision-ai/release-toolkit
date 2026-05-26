@@ -1,0 +1,139 @@
+name: "Release Preview (Node)"
+description: "PR-time release preview for Node/pnpm repos — deterministic notes + AI polish comment"
+
+inputs:
+  pnpm_version:
+    description: "Pinned pnpm version. Empty = use packageManager from package.json."
+    required: false
+    default: ""
+  github_token:
+    description: "GITHUB_TOKEN from the caller workflow"
+    required: true
+  openai_api_key:
+    description: "OPENAI_API_KEY for AI polish preview"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.head_ref }}
+        fetch-depth: 0
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm_version }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: "pnpm"
+        registry-url: "https://npm.pkg.github.com"
+        scope: "@spacevision-ai"
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Install release-toolkit (CI-only)
+      shell: bash
+      run: pnpm add @spacevision-ai/release-toolkit-node --ignore-workspace-root-check
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Compute release preview (deterministic)
+      id: deterministic
+      shell: bash
+      env:
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: node node_modules/@spacevision-ai/release-toolkit-node/scripts/preview-release.mjs
+
+    - name: Compute AI polish preview
+      id: ai
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        PREVIEW_NOTES: ${{ steps.deterministic.outputs.notes }}
+      run: |
+        VERSION="${{ steps.deterministic.outputs.version }}"
+        if [ "$VERSION" = "(변경사항 없음)" ]; then
+          echo "polished=릴리즈할 새 변경사항이 없어 AI 정제를 생략합니다." >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        set +e
+        node node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs "$VERSION" --preview > /tmp/polished.txt 2> /tmp/polish-err.log
+        set -e
+
+        echo "--- AI polish stderr ---"
+        cat /tmp/polish-err.log
+        echo "--- end stderr ---"
+        POLISHED=$(cat /tmp/polished.txt)
+
+        if [ -z "$POLISHED" ]; then
+          POLISHED="AI 정제에 실패했습니다 (폴백: 결정론 노트 참고)."
+        fi
+
+        echo "polished<<EOF" >> "$GITHUB_OUTPUT"
+        echo "$POLISHED" >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
+
+    - name: Post or update preview comment
+      uses: actions/github-script@v7
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        DET_VERSION: ${{ steps.deterministic.outputs.version }}
+        DET_NOTES: ${{ steps.deterministic.outputs.notes }}
+        AI_POLISHED: ${{ steps.ai.outputs.polished }}
+      with:
+        script: |
+          const version = process.env.DET_VERSION;
+          const deterministicNotes = process.env.DET_NOTES;
+          const aiPolished = process.env.AI_POLISHED;
+          const marker = '<!-- release-preview -->';
+
+          const body = [
+            marker,
+            `## 🚀 다음 릴리즈 미리보기 — ${version}`,
+            '',
+            '### 📋 결정론 노트 (`CHANGELOG.md` · git 태그에 그대로 기록)',
+            '',
+            '```',
+            deterministicNotes,
+            '```',
+            '',
+            '### ✨ AI 정제 미리보기 (GitHub Release 페이지 — 참고용)',
+            '',
+            '> 실제 릴리즈 시점에 AI가 다시 생성하므로 내용이 달라질 수 있습니다.',
+            '',
+            aiPolished,
+          ].join('\n');
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }
