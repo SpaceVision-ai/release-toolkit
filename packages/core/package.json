@@ -1,6 +1,6 @@
 {
   "name": "@spacevision-ai/release-toolkit-core",
-  "version": "0.0.0-development",
+  "version": "0.0.0",
   "description": "SpaceVision 릴리즈 자동화 stack-agnostic core — commit 컨벤션 SSOT와 polish 스크립트",
   "license": "UNLICENSED",
   "type": "module",
