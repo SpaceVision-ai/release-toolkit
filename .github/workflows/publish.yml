@@ -75,21 +75,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # changesets publish가 만든 가장 최신 sub-package tag에서 major 추출.
-          # tag 형식이 "@scope/pkg@1.2.3" 또는 "v1.2.3" 등으로 다양해 첫 번째로 매칭되는
-          # X.Y.Z 패턴의 major(X)를 추출한다. 모든 sub-package가 major 동기화되어 있다고 가정.
-          LATEST_TAG=$(git tag --sort=-v:refname --merged HEAD | head -1)
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No tag found, skipping major tag move."
-            exit 0
-          fi
-          MAJOR=$(echo "$LATEST_TAG" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -d. -f1)
+          # packages/node/package.json에서 직접 major 버전 추출.
+          # git tag --sort=-v:refname은 "v0" 같은 major-only tag를 @scope/pkg@X.Y.Z보다
+          # 먼저 반환할 수 있어 파싱이 실패한다. package.json 직접 읽기가 더 안정적.
+          MAJOR=$(grep '"version"' packages/node/package.json | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | cut -d. -f1)
           if [ -z "$MAJOR" ]; then
-            echo "Could not parse major from $LATEST_TAG, skipping."
+            echo "Could not parse major from packages/node/package.json, skipping."
             exit 0
           fi
           MAJOR_TAG="v${MAJOR}"
-          echo "Moving ${MAJOR_TAG} to point at HEAD (${LATEST_TAG})"
+          echo "Moving ${MAJOR_TAG} to point at HEAD (packages/node@${MAJOR}.x.x)"
           git tag -f "${MAJOR_TAG}" HEAD
           git push origin "${MAJOR_TAG}" --force
 
