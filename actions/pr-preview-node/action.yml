@@ -45,8 +45,9 @@ runs:
         mkdir -p node_modules/@spacevision-ai
         ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
         ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
-        # core/package.json의 "type":"module" 제거: CJS require() 호환을 위해.
-        node -e "const fs=require('fs'),f='node_modules/@spacevision-ai/release-toolkit-core/package.json',p=JSON.parse(fs.readFileSync(f,'utf8'));delete p.type;fs.writeFileSync(f,JSON.stringify(p))"
+        # symlink를 follow하면 Node.js가 toolkit 내부 경로 기준으로 require를 resolve해서
+        # 자식 레포의 node_modules를 찾지 못한다. NODE_PATH로 강제 지정한다.
+        echo "NODE_PATH=$(pwd)/node_modules" >> "$GITHUB_ENV"
 
     - name: Compute release preview (deterministic)
       id: deterministic
