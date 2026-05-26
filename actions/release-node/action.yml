@@ -58,8 +58,9 @@ runs:
     - name: Configure GitHub Packages auth
       shell: bash
       run: |
-        echo "//npm.pkg.github.com/:_authToken=${{ inputs.github_token }}" >> ~/.npmrc
-        echo "@spacevision-ai:registry=https://npm.pkg.github.com" >> ~/.npmrc
+        TARGET="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+        echo "//npm.pkg.github.com/:_authToken=${{ inputs.github_token }}" >> "$TARGET"
+        echo "@spacevision-ai:registry=https://npm.pkg.github.com" >> "$TARGET"
 
     - name: Install dependencies
       shell: bash
