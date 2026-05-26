@@ -244,34 +244,76 @@ try {
     currentIdx >= 0 ? (tags[currentIdx + 1] ?? "") : (tags[0] ?? "");
 } catch {}
 
-// 기여자 목록 (이전 태그 ~ HEAD 사이 또는 전체).
-// execSync 실패는 silent로 삼키지 않는다. 과거 web-console 1.3.3에서 contributors가 빈 배열로
-// 평가되어 기여자 라인이 누락된 사례가 있어, 실패 시 stderr 출력으로 원인 추적을 보존한다.
+// 기여자 목록: commit SHA → GitHub API → author.login 방식으로 resolve.
+// git author name(%aN)은 display name이 되어 이름과 username이 불일치할 수 있으므로
+// GitHub API로 실제 username을 가져온다. API 실패 시 %aN으로 fallback.
 const contributorRange = previousTag ? `${previousTag}..HEAD` : "HEAD";
 let contributors = [];
-try {
-  const names = execSync(
-    `git log ${contributorRange} --format='%aN' --no-merges`,
-    { encoding: "utf-8" },
-  )
-    .trim()
-    .split("\n")
-    .filter(Boolean);
-  contributors = [...new Set(names)];
-  if (!contributors.length) {
-    console.warn(
-      `[polish] No contributors found in range ${contributorRange}.`,
-    );
+const githubToken = process.env.GITHUB_TOKEN;
+
+if (githubToken && owner && repoName) {
+  // commit SHA 목록 추출
+  let shas = [];
+  try {
+    shas = execSync(
+      `git log ${contributorRange} --format="%H" --no-merges`,
+      { encoding: "utf-8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+  } catch (err) {
+    console.warn(`[polish] Failed to get commit SHAs: ${err.message}`);
   }
-} catch (err) {
-  console.warn(
-    `[polish] Failed to read contributors for range ${contributorRange}:`,
-    err.message,
-  );
+
+  // 각 SHA에 대해 GitHub API로 author.login 조회
+  const logins = new Set();
+  for (const sha of shas) {
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}`,
+        {
+          headers: {
+            Authorization: `Bearer ${githubToken}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "release-toolkit-polish",
+          },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const login = data?.author?.login;
+        // bot 계정(github-actions[bot] 등) 제외
+        if (login && !login.endsWith("[bot]")) logins.add(login);
+      }
+    } catch {}
+  }
+
+  contributors = [...logins];
+  if (!contributors.length) {
+    console.warn(`[polish] No contributors found via GitHub API for range ${contributorRange}.`);
+  }
+} else {
+  // GITHUB_TOKEN 없을 때 fallback: git author name
+  try {
+    const names = execSync(
+      `git log ${contributorRange} --format='%aN' --no-merges`,
+      { encoding: "utf-8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    contributors = [...new Set(names)];
+    if (!contributors.length) {
+      console.warn(`[polish] No contributors found in range ${contributorRange}.`);
+    }
+  } catch (err) {
+    console.warn(`[polish] Failed to read contributors: ${err.message}`);
+  }
 }
 
-const formatContributor = (name) =>
-  /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})$/.test(name) ? `@${name}` : name;
+const formatContributor = (login) => `@${login}`;
 
 const [owner, repoName] = (process.env.GITHUB_REPOSITORY ?? "/").split("/");
 const footerLines = [];
