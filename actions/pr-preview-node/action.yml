@@ -38,11 +38,10 @@ runs:
     - name: Configure GitHub Packages auth
       shell: bash
       run: |
-        # NPM_CONFIG_USERCONFIG는 setup-node가 설정한 실제 .npmrc 경로.
-        # ~/.npmrc가 아니라 이 파일에 token을 박아야 pnpm이 읽는다.
-        TARGET="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-        echo "//npm.pkg.github.com/:_authToken=${{ inputs.github_token }}" >> "$TARGET"
-        echo "@spacevision-ai:registry=https://npm.pkg.github.com" >> "$TARGET"
+        # pnpm config set으로 직접 설정 — .npmrc의 ${NODE_AUTH_TOKEN} placeholder를
+        # pnpm이 expand하지 않는 경우를 대비해 실제 token 값을 직접 주입한다.
+        pnpm config set //npm.pkg.github.com/:_authToken ${{ inputs.github_token }} --global
+        pnpm config set @spacevision-ai:registry https://npm.pkg.github.com --global
 
     - name: Install dependencies
       shell: bash
