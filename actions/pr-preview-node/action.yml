@@ -35,25 +35,18 @@ runs:
         registry-url: "https://npm.pkg.github.com"
         scope: "@spacevision-ai"
 
-    - name: Configure GitHub Packages auth
-      shell: bash
-      run: |
-        # pnpm config set으로 직접 설정 — .npmrc의 ${NODE_AUTH_TOKEN} placeholder를
-        # pnpm이 expand하지 않는 경우를 대비해 실제 token 값을 직접 주입한다.
-        pnpm config set //npm.pkg.github.com/:_authToken ${{ inputs.github_token }} --global
-        pnpm config set @spacevision-ai:registry https://npm.pkg.github.com --global
-
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile
-      env:
-        NODE_AUTH_TOKEN: ${{ inputs.github_token }}
 
-    - name: Install release-toolkit (CI-only)
+    - name: Link release-toolkit from action repository (no install needed)
       shell: bash
-      run: pnpm add @spacevision-ai/release-toolkit-node --ignore-workspace-root-check
-      env:
-        NODE_AUTH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        # GitHub Actions가 composite action 로드 시 toolkit 레포를 이미 로컬에 다운로드한다.
+        # npm install/GitHub Packages 인증 없이 GITHUB_ACTION_PATH로 직접 symlink를 만든다.
+        mkdir -p node_modules/@spacevision-ai
+        ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
+        ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
 
     - name: Compute release preview (deterministic)
       id: deterministic
