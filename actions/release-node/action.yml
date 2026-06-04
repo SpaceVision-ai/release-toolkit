@@ -119,7 +119,8 @@ runs:
         git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
         git fetch origin
         git checkout main 2>/dev/null || git checkout -b main origin/main
-        git merge origin/release --no-edit
+        # release가 릴리즈 산출물의 source of truth. version/CHANGELOG 충돌 시 항상 release 채택.
+        git merge origin/release --no-edit -X theirs
         git push origin main
 
     - name: Trigger deploy workflow (after main sync)
@@ -137,7 +138,8 @@ runs:
       run: |
         git fetch origin
         git checkout develop 2>/dev/null || git checkout -b develop origin/develop
-        git merge origin/main --no-edit
+        # main이 릴리즈 후 최신. develop과 SHA가 어긋나도(과거 rebase 등) version/CHANGELOG는 main 채택해 충돌로 멈추지 않게 한다.
+        git merge origin/main --no-edit -X theirs
         git push origin develop
 
     - name: Trigger dev deploy workflow (after develop sync)
