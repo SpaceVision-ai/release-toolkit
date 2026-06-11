@@ -1,0 +1,28 @@
+name: Release Preview (Dart, reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        type: string
+        default: "22"
+      pnpm_version:
+        type: string
+        default: ""
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: SpaceVision-ai/release-toolkit/actions/pr-preview-dart@v0
+        with:
+          node_version: ${{ inputs.node_version }}
+          pnpm_version: ${{ inputs.pnpm_version }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
