@@ -1,0 +1,145 @@
+name: "Release (Dart)"
+description: "Full release flow for Dart/Flutter repos — semantic-release with pubspec.yaml bump"
+
+inputs:
+  node_version:
+    description: "Node.js version"
+    required: false
+    default: "22"
+  pnpm_version:
+    description: "pnpm version (empty = use packageManager)"
+    required: false
+    default: ""
+  openai_api_key:
+    description: "OpenAI API key for AI release notes polish"
+    required: false
+    default: ""
+  trigger_deploy_workflow:
+    description: "Workflow file to dispatch on main after sync. Empty = skip."
+    required: false
+    default: ""
+  trigger_dev_deploy_workflow:
+    description: "Workflow file to dispatch on develop after back-merge. Empty = skip."
+    required: false
+    default: ""
+  sync_to_main:
+    description: "Sync release branch to main after release"
+    required: false
+    default: "true"
+  back_merge_to_develop:
+    description: "Back-merge main to develop after release"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm_version }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    - name: Bootstrap Node dependencies (isolated tmpdir)
+      shell: bash
+      run: |
+        DEPS_DIR=$(mktemp -d)
+        echo '{"private":true}' > "$DEPS_DIR/package.json"
+        (cd "$DEPS_DIR" && pnpm add -D \
+          semantic-release@24.1.2 \
+          @semantic-release/changelog@6.0.3 \
+          @semantic-release/commit-analyzer@13.0.0 \
+          @semantic-release/exec@6.0.3 \
+          @semantic-release/git@10.0.1 \
+          @semantic-release/github@11.0.0 \
+          @semantic-release/release-notes-generator@14.0.1 \
+          conventional-changelog-conventionalcommits@8.0.0 \
+          @commitlint/cli@19.5.0 \
+          @commitlint/config-conventional@19.5.0)
+
+        mkdir -p "$DEPS_DIR/node_modules/@spacevision-ai"
+        ln -sf "$GITHUB_ACTION_PATH/../../packages/core" \
+          "$DEPS_DIR/node_modules/@spacevision-ai/release-toolkit-core"
+        ln -sf "$GITHUB_ACTION_PATH/../../packages/dart" \
+          "$DEPS_DIR/node_modules/@spacevision-ai/release-toolkit-dart"
+
+        echo "NODE_PATH=$DEPS_DIR/node_modules" >> "$GITHUB_ENV"
+        echo "$DEPS_DIR/node_modules/.bin" >> "$GITHUB_PATH"
+
+    - name: Configure Git
+      shell: bash
+      run: |
+        git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Strict commit check
+      shell: bash
+      run: |
+        LAST_RELEASE=$(git log --format=%H --grep='^chore(release):' -1 || echo "")
+        if [ -z "$LAST_RELEASE" ]; then
+          echo "No prior auto-release commit found — skipping strict check (legacy commits)"
+        else
+          echo "Checking commits in $LAST_RELEASE..HEAD"
+          commitlint --from "$LAST_RELEASE" --to HEAD --verbose
+        fi
+
+    - name: Run semantic-release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GIT_AUTHOR_NAME: github-actions[bot]
+        GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+        GIT_COMMITTER_NAME: github-actions[bot]
+        GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+      run: semantic-release
+
+    - name: Sync release → main
+      if: ${{ inputs.sync_to_main == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        git fetch origin
+        git checkout main 2>/dev/null || git checkout -b main origin/main
+        git merge origin/release --no-edit -X theirs
+        git push origin main
+
+    - name: Trigger deploy workflow (after main sync)
+      if: ${{ inputs.sync_to_main == 'true' && inputs.trigger_deploy_workflow != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEPLOY_WORKFLOW: ${{ inputs.trigger_deploy_workflow }}
+      run: gh workflow run "$DEPLOY_WORKFLOW" --ref main --repo ${{ github.repository }}
+
+    - name: Back-merge main → develop
+      if: ${{ inputs.back_merge_to_develop == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        git fetch origin
+        git checkout develop 2>/dev/null || git checkout -b develop origin/develop
+        git merge origin/main --no-edit -X theirs
+        git push origin develop
+
+    - name: Trigger dev deploy workflow (after develop sync)
+      if: ${{ inputs.back_merge_to_develop == 'true' && inputs.trigger_dev_deploy_workflow != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEV_DEPLOY_WORKFLOW: ${{ inputs.trigger_dev_deploy_workflow }}
+      run: gh workflow run "$DEV_DEPLOY_WORKFLOW" --ref develop --repo ${{ github.repository }}
