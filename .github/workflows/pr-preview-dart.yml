@@ -8,7 +8,7 @@ on:
         default: "22"
       pnpm_version:
         type: string
-        default: ""
+        default: "10"
     secrets:
       OPENAI_API_KEY:
         required: false

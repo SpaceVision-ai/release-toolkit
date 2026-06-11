@@ -30,6 +30,11 @@ name: Release
 on:
   push:
     branches: [release]
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
 jobs:
   release:
     uses: SpaceVision-ai/release-toolkit/.github/workflows/release-dart.yml@v0
@@ -44,6 +49,9 @@ name: PR Preview
 on:
   pull_request:
     branches: [release]
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   preview:
     uses: SpaceVision-ai/release-toolkit/.github/workflows/pr-preview-dart.yml@v0

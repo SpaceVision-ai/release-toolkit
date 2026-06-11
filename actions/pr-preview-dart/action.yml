@@ -3,9 +3,9 @@ description: "PR-time release preview for Dart/Flutter repos — deterministic n
 
 inputs:
   pnpm_version:
-    description: "Pinned pnpm version. Empty = use packageManager."
+    description: "pnpm version"
     required: false
-    default: ""
+    default: "10"
   node_version:
     description: "Node.js version"
     required: false
