@@ -59,12 +59,12 @@ runs:
       shell: bash
       run: pnpm install --frozen-lockfile
 
-    - name: Link release-toolkit from action repository (no install needed)
+    - name: Copy release-toolkit from action repository (no install needed)
       shell: bash
       run: |
         mkdir -p node_modules/@spacevision-ai
-        ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
-        ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
+        cp -r "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
+        cp -r "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
         echo "NODE_PATH=$(pwd)/node_modules" >> "$GITHUB_ENV"
 
     - name: Lint

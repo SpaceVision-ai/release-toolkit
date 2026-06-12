@@ -39,15 +39,14 @@ runs:
       shell: bash
       run: pnpm install --frozen-lockfile
 
-    - name: Link release-toolkit from action repository (no install needed)
+    - name: Copy release-toolkit from action repository (no install needed)
       shell: bash
       run: |
         mkdir -p node_modules/@spacevision-ai
-        ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
-        ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
-        # ESM은 symlink를 따라가 실제 경로 기준으로 resolve하므로 NODE_PATH만으로는 부족하다.
-        # --preserve-symlinks로 symlink 경로(caller의 node_modules) 기준 resolve를 강제한다.
-        # NOTE: NODE_OPTIONS는 GITHUB_ENV로 설정 불가(보안 차단) → node 호출 시 직접 전달
+        # symlink 대신 복사: ESM은 실제 파일 경로 기준으로 resolve하므로
+        # symlink → action repo 경로에서 sibling 패키지를 찾지 못한다.
+        cp -r "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
+        cp -r "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
         echo "NODE_PATH=$(pwd)/node_modules" >> "$GITHUB_ENV"
 
     - name: Compute release preview (deterministic)
@@ -55,7 +54,7 @@ runs:
       shell: bash
       env:
         GITHUB_REPOSITORY: ${{ github.repository }}
-      run: node --preserve-symlinks node_modules/@spacevision-ai/release-toolkit-node/scripts/preview-release.mjs
+      run: node node_modules/@spacevision-ai/release-toolkit-node/scripts/preview-release.mjs
 
     - name: Compute AI polish preview
       id: ai
@@ -71,7 +70,7 @@ runs:
         fi
 
         set +e
-        node --preserve-symlinks node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs "$VERSION" --preview > /tmp/polished.txt 2> /tmp/polish-err.log
+        node node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs "$VERSION" --preview > /tmp/polished.txt 2> /tmp/polish-err.log
         set -e
 
         echo "--- AI polish stderr ---"
