@@ -6,11 +6,14 @@
   "type": "module",
   "files": [
     "conventions.cjs",
+    "config",
     "scripts",
     "README.md"
   ],
   "exports": {
     "./conventions": "./conventions.cjs",
+    "./config/commitlint-base": "./config/commitlint-base.cjs",
+    "./scripts/preview-release.mjs": "./scripts/preview-release.mjs",
     "./scripts/polish-release-notes.mjs": "./scripts/polish-release-notes.mjs"
   },
   "scripts": {

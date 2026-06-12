@@ -1,0 +1,47 @@
+name: Release (Dart, reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        type: string
+        default: "22"
+      pnpm_version:
+        type: string
+        default: "10"
+      sync_to_main:
+        type: boolean
+        default: true
+      back_merge_to_develop:
+        type: boolean
+        default: true
+      trigger_deploy_workflow:
+        type: string
+        default: ""
+      trigger_dev_deploy_workflow:
+        type: string
+        default: ""
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  release:
+    if: ${{ !contains(github.event.head_commit.message, 'skip ci') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: SpaceVision-ai/release-toolkit/actions/release-dart@v0
+        with:
+          node_version: ${{ inputs.node_version }}
+          pnpm_version: ${{ inputs.pnpm_version }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          trigger_deploy_workflow: ${{ inputs.trigger_deploy_workflow }}
+          trigger_dev_deploy_workflow: ${{ inputs.trigger_dev_deploy_workflow }}
+          sync_to_main: ${{ inputs.sync_to_main }}
+          back_merge_to_develop: ${{ inputs.back_merge_to_develop }}
