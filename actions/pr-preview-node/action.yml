@@ -45,8 +45,9 @@ runs:
         mkdir -p node_modules/@spacevision-ai
         ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
         ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
-        # symlink를 follow하면 Node.js가 toolkit 내부 경로 기준으로 require를 resolve해서
-        # 자식 레포의 node_modules를 찾지 못한다. NODE_PATH로 강제 지정한다.
+        # ESM은 symlink를 따라가 실제 경로 기준으로 resolve하므로 NODE_PATH만으로는 부족하다.
+        # --preserve-symlinks로 symlink 경로(caller의 node_modules) 기준 resolve를 강제한다.
+        echo "NODE_OPTIONS=--preserve-symlinks" >> "$GITHUB_ENV"
         echo "NODE_PATH=$(pwd)/node_modules" >> "$GITHUB_ENV"
 
     - name: Compute release preview (deterministic)
