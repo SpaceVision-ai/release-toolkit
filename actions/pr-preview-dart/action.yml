@@ -1,0 +1,145 @@
+name: "Release Preview (Dart)"
+description: "PR-time release preview for Dart/Flutter repos — deterministic notes + AI polish comment"
+
+inputs:
+  pnpm_version:
+    description: "pnpm version"
+    required: false
+    default: "10"
+  node_version:
+    description: "Node.js version"
+    required: false
+    default: "22"
+  openai_api_key:
+    description: "OpenAI API key for AI polish preview"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.head_ref }}
+        fetch-depth: 0
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm_version }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    - name: Bootstrap Node dependencies (isolated tmpdir)
+      shell: bash
+      run: |
+        DEPS_DIR=$(mktemp -d)
+        echo '{"private":true}' > "$DEPS_DIR/package.json"
+        (cd "$DEPS_DIR" && pnpm add -D \
+          semantic-release@24.1.2 \
+          @semantic-release/changelog@6.0.3 \
+          @semantic-release/commit-analyzer@13.0.0 \
+          @semantic-release/exec@6.0.3 \
+          @semantic-release/git@10.0.1 \
+          @semantic-release/github@11.0.0 \
+          @semantic-release/release-notes-generator@14.0.1 \
+          conventional-changelog-conventionalcommits@8.0.0)
+
+        mkdir -p "$DEPS_DIR/node_modules/@spacevision-ai"
+        ln -sf "$GITHUB_ACTION_PATH/../../packages/core" \
+          "$DEPS_DIR/node_modules/@spacevision-ai/release-toolkit-core"
+        ln -sf "$GITHUB_ACTION_PATH/../../packages/dart" \
+          "$DEPS_DIR/node_modules/@spacevision-ai/release-toolkit-dart"
+
+        echo "NODE_PATH=$DEPS_DIR/node_modules" >> "$GITHUB_ENV"
+        echo "$DEPS_DIR/node_modules/.bin" >> "$GITHUB_PATH"
+
+    - name: Compute release preview (deterministic)
+      id: deterministic
+      shell: bash
+      env:
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: node "$GITHUB_ACTION_PATH/../../packages/core/scripts/preview-release.mjs"
+
+    - name: Compute AI polish preview
+      id: ai
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        PREVIEW_NOTES: ${{ steps.deterministic.outputs.notes }}
+      run: |
+        VERSION="${{ steps.deterministic.outputs.version }}"
+        if [ "$VERSION" = "(변경사항 없음)" ]; then
+          echo "polished=릴리즈할 새 변경사항이 없어 AI 정제를 생략합니다." >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        set +e
+        node "$GITHUB_ACTION_PATH/../../packages/core/scripts/polish-release-notes.mjs" "$VERSION" --preview > /tmp/polished.txt 2> /tmp/polish-err.log
+        set -e
+
+        echo "--- AI polish stderr ---"
+        cat /tmp/polish-err.log
+        echo "--- end stderr ---"
+        POLISHED=$(cat /tmp/polished.txt)
+
+        if [ -z "$POLISHED" ]; then
+          POLISHED="AI 정제에 실패했습니다 (폴백: 결정론 노트 참고)."
+        fi
+
+        echo "polished<<EOF" >> "$GITHUB_OUTPUT"
+        echo "$POLISHED" >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
+
+    - name: Post or update preview comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const version = `${{ steps.deterministic.outputs.version }}`;
+          const deterministicNotes = `${{ steps.deterministic.outputs.notes }}`;
+          const aiPolished = `${{ steps.ai.outputs.polished }}`;
+          const marker = '<!-- release-preview-dart -->';
+
+          const body = [
+            marker,
+            `## 🚀 다음 릴리즈 미리보기 — ${version}`,
+            '',
+            '### 📋 결정론 노트 (`CHANGELOG.md` · git 태그에 그대로 기록)',
+            '',
+            '```',
+            deterministicNotes,
+            '```',
+            '',
+            '### ✨ AI 정제 미리보기 (GitHub Release 페이지 — 참고용)',
+            '',
+            '> 실제 릴리즈 시점에 AI가 다시 생성하므로 내용이 달라질 수 있습니다.',
+            '',
+            aiPolished,
+          ].join('\n');
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }
