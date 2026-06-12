@@ -1,5 +1,12 @@
 # @spacevision-ai/release-toolkit-node
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`ab6c994`](https://github.com/SpaceVision-ai/release-toolkit/commit/ab6c9940f69e0b9bdbfcd7999eff9bef9685cd8c)]:
+  - @spacevision-ai/release-toolkit-core@0.0.1
+
 ## 0.1.0
 
 ### Minor Changes
