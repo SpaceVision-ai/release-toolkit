@@ -65,7 +65,6 @@ runs:
         mkdir -p node_modules/@spacevision-ai
         ln -sf "$GITHUB_ACTION_PATH/../../packages/node" node_modules/@spacevision-ai/release-toolkit-node
         ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
-        echo "NODE_OPTIONS=--preserve-symlinks" >> "$GITHUB_ENV"
         echo "NODE_PATH=$(pwd)/node_modules" >> "$GITHUB_ENV"
 
     - name: Lint

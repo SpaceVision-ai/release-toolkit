@@ -47,7 +47,7 @@ runs:
         ln -sf "$GITHUB_ACTION_PATH/../../packages/core" node_modules/@spacevision-ai/release-toolkit-core
         # ESM은 symlink를 따라가 실제 경로 기준으로 resolve하므로 NODE_PATH만으로는 부족하다.
         # --preserve-symlinks로 symlink 경로(caller의 node_modules) 기준 resolve를 강제한다.
-        echo "NODE_OPTIONS=--preserve-symlinks" >> "$GITHUB_ENV"
+        # NOTE: NODE_OPTIONS는 GITHUB_ENV로 설정 불가(보안 차단) → node 호출 시 직접 전달
         echo "NODE_PATH=$(pwd)/node_modules" >> "$GITHUB_ENV"
 
     - name: Compute release preview (deterministic)
@@ -55,7 +55,7 @@ runs:
       shell: bash
       env:
         GITHUB_REPOSITORY: ${{ github.repository }}
-      run: node node_modules/@spacevision-ai/release-toolkit-node/scripts/preview-release.mjs
+      run: node --preserve-symlinks node_modules/@spacevision-ai/release-toolkit-node/scripts/preview-release.mjs
 
     - name: Compute AI polish preview
       id: ai
@@ -71,7 +71,7 @@ runs:
         fi
 
         set +e
-        node node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs "$VERSION" --preview > /tmp/polished.txt 2> /tmp/polish-err.log
+        node --preserve-symlinks node_modules/@spacevision-ai/release-toolkit-core/scripts/polish-release-notes.mjs "$VERSION" --preview > /tmp/polished.txt 2> /tmp/polish-err.log
         set -e
 
         echo "--- AI polish stderr ---"
