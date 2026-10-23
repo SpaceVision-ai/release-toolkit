@@ -13,12 +13,24 @@ const FIXES = "## 테스트 중 수정";
 const notesFor = (run, repo, from, to) =>
   renderNotes(parseCommits(readCommitLines(from, to, run)), { repo });
 
-const viewRelease = (run, repo, version) => {
-  try {
-    return JSON.parse(run("gh", ["release", "view", version, "-R", repo, "--json", "body,isDraft,isPrerelease"]));
-  } catch {
-    return null;
-  }
+// `gh release view/edit <tag>`는 태그로 찾는 API를 써서 태그 없는 초안을 못 찾는다.
+// 목록 API에서 tag_name으로 고르고, 수정은 release id로 한다.
+const findRelease = (run, repo, version) => {
+  const out = run("gh", [
+    "api", `repos/${repo}/releases`, "--paginate",
+    "--jq", `.[] | select(.tag_name=="${version}") | {id, body, isDraft: .draft, isPrerelease: .prerelease}`,
+  ]);
+  const line = String(out ?? "").split("\n").find((l) => l.trim());
+  return line ? JSON.parse(line) : null;
+};
+
+// fields: 문자열은 -f, 불리언은 -F(타입 유지), body는 파일로 넘긴다.
+const patchRelease = (run, repo, id, { strings = {}, booleans = {}, bodyFile }) => {
+  const args = ["api", "-X", "PATCH", `repos/${repo}/releases/${id}`];
+  for (const [k, v] of Object.entries(strings)) args.push("-f", `${k}=${v}`);
+  for (const [k, v] of Object.entries(booleans)) args.push("-F", `${k}=${v}`);
+  if (bodyFile) args.push("-F", `body=@${bodyFile}`);
+  run("gh", args);
 };
 
 export function startRelease({ run, repo, version, fromRef, startRef, polish, writeFile }) {
@@ -27,8 +39,9 @@ export function startRelease({ run, repo, version, fromRef, startRef, polish, wr
   // 커밋이 없으면 AI에 보낼 내용이 없다.
   const summary = raw ? polish(version, raw) : "변경 사항 없음";
   const file = writeFile(`${summary}${compare}`);
-  if (viewRelease(run, repo, version)) {
-    run("gh", ["release", "edit", version, "-R", repo, "--notes-file", file]);
+  const existing = findRelease(run, repo, version);
+  if (existing) {
+    patchRelease(run, repo, existing.id, { bodyFile: file });
   } else {
     run("gh", ["release", "create", version, "-R", repo, "--draft", "--title", version, "--target", startRef, "--notes-file", file]);
   }
@@ -74,7 +87,7 @@ function backMerge(run, repo, version, ref) {
 }
 
 export function endRelease({ run, repo, version, startRef, finalRef, ref, writeFile }) {
-  const current = viewRelease(run, repo, version);
+  const current = findRelease(run, repo, version);
   const body = withFixes(current?.body ?? "", notesFor(run, repo, startRef, finalRef));
   const file = writeFile(body);
 
@@ -84,7 +97,16 @@ export function endRelease({ run, repo, version, startRef, finalRef, ref, writeF
   }
   run("git", ["tag", "-f", version, finalRef]);
   run("git", ["push", "origin", `refs/tags/${version}`]);
-  run("gh", ["release", "edit", version, "-R", repo, "--tag", version, "--draft=false", "--prerelease", "--notes-file", file]);
+  if (current) {
+    patchRelease(run, repo, current.id, {
+      strings: { tag_name: version, target_commitish: finalRef },
+      booleans: { draft: false, prerelease: true },
+      bodyFile: file,
+    });
+  } else {
+    // 시작 단계에서 초안을 못 만들었으면 여기서 프리릴리즈로 만든다.
+    run("gh", ["release", "create", version, "-R", repo, "--prerelease", "--title", version, "--target", finalRef, "--notes-file", file]);
+  }
 
   return { backMerge: backMerge(run, repo, version, ref) };
 }
@@ -103,10 +125,14 @@ export function factsBlock({ build, startedAt, endedAt, releasedAt, testBuilds, 
 }
 
 export function publishRelease({ run, repo, version, facts, writeFile }) {
-  const current = viewRelease(run, repo, version);
+  const current = findRelease(run, repo, version);
   if (!current || (!current.isPrerelease && !current.isDraft)) return { published: false };
   const file = writeFile(`${factsBlock(facts)}\n\n${current.body ?? ""}`);
-  run("gh", ["release", "edit", version, "-R", repo, "--draft=false", "--prerelease=false", "--latest", "--title", `${version} · 빌드 ${facts.build}`, "--notes-file", file]);
+  patchRelease(run, repo, current.id, {
+    booleans: { draft: false, prerelease: false },
+    strings: { make_latest: "true", name: `${version} · 빌드 ${facts.build}` },
+    bodyFile: file,
+  });
   return { published: true };
 }
 

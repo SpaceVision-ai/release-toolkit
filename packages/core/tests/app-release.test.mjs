@@ -29,7 +29,7 @@ const ctx = (over = {}) => ({
 
 describe("startRelease", () => {
   it("범위에 커밋이 없으면 AI에 보내지 않고 '변경 사항 없음'을 쓴다", () => {
-    const { run } = fakeRun({ "git log": "", "gh release view 1.5.0": new Error("not found") });
+    const { run } = fakeRun({ "git log": "", "gh api repos/o/r/releases --paginate": "" });
     let polished = 0;
     let written = "";
     startRelease(ctx({ run, polish: () => { polished++; return "x"; }, writeFile: (t) => { written = t; return "/tmp/body.md"; } }));
@@ -40,7 +40,7 @@ describe("startRelease", () => {
   it("릴리즈가 없으면 초안을 만든다", () => {
     const { run, calls } = fakeRun({
       "git log 1.4.0..S": "aaaaaaa1\tfeat: 기능\n",
-      "gh release view 1.5.0": new Error("release not found"),
+      "gh api repos/o/r/releases --paginate": "",
     });
     startRelease(ctx({ run }));
     expect(calls.at(-1)).toBe(
@@ -51,10 +51,26 @@ describe("startRelease", () => {
   it("이미 있으면(재테스트) 본문만 고친다", () => {
     const { run, calls } = fakeRun({
       "git log 1.4.0..S": "aaaaaaa1\tfeat: 기능\n",
-      "gh release view 1.5.0": '{"isDraft":false}',
+      "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":true,"isPrerelease":false}',
     });
     startRelease(ctx({ run }));
-    expect(calls.at(-1)).toBe("gh release edit 1.5.0 -R o/r --notes-file /tmp/body.md");
+    expect(calls.at(-1)).toBe("gh api -X PATCH repos/o/r/releases/7 -F body=@/tmp/body.md");
+  });
+});
+
+describe("release lookup", () => {
+  it("태그 없는 초안도 찾도록 목록 API에서 tag_name으로 고른다", () => {
+    const { run, calls } = fakeRun({ "git log": "aaaaaaa1\tfeat: 기능\n", "gh api repos/o/r/releases --paginate": "" });
+    startRelease(ctx({ run }));
+    expect(calls).toContain(
+      'gh api repos/o/r/releases --paginate --jq .[] | select(.tag_name=="1.5.0") | {id, body, isDraft: .draft, isPrerelease: .prerelease}',
+    );
+  });
+
+  it("종료 때 릴리즈가 없으면(시작 실패) 프리릴리즈로 새로 만든다", () => {
+    const { run, calls } = fakeRun({ "gh api repos/o/r/releases --paginate": "" });
+    endRelease(ctx({ run }));
+    expect(calls).toContain("gh release create 1.5.0 -R o/r --prerelease --title 1.5.0 --target F --notes-file /tmp/body.md");
   });
 });
 
@@ -71,7 +87,7 @@ describe("withFixes", () => {
 describe("endRelease", () => {
   it("태그를 최종 커밋에 찍고 프리릴리즈로 바꾸고 develop에 백머지한다", () => {
     const { run, calls } = fakeRun({
-      "gh release view 1.5.0": '{"body":"요약"}',
+      "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":true,"isPrerelease":false}',
       "git log S..F": "",
       "git ls-remote": "",
     });
@@ -79,7 +95,7 @@ describe("endRelease", () => {
     expect(calls).toEqual(expect.arrayContaining([
       "git tag -f 1.5.0 F",
       "git push origin refs/tags/1.5.0",
-      "gh release edit 1.5.0 -R o/r --tag 1.5.0 --draft=false --prerelease --notes-file /tmp/body.md",
+      "gh api -X PATCH repos/o/r/releases/7 -f tag_name=1.5.0 -f target_commitish=F -F draft=false -F prerelease=true -F body=@/tmp/body.md",
       "git merge --no-ff origin/main -m chore: main 백머지 (1.5.0)",
       "git push origin HEAD:develop",
     ]));
@@ -87,7 +103,7 @@ describe("endRelease", () => {
 
   it("재테스트라 원격 태그가 이미 있으면 먼저 지운다", () => {
     const { run, calls } = fakeRun({
-      "gh release view 1.5.0": '{"body":"요약"}',
+      "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":true,"isPrerelease":false}',
       "git ls-remote": "abc\trefs/tags/1.5.0\n",
     });
     endRelease(ctx({ run }));
@@ -98,7 +114,7 @@ describe("endRelease", () => {
 
   it("백머지가 충돌하면 중단하고 PR을 만든다", () => {
     const { run, calls } = fakeRun({
-      "gh release view 1.5.0": '{"body":"요약"}',
+      "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":true,"isPrerelease":false}',
       "git merge --no-ff": new Error("CONFLICT"),
     });
     const result = endRelease(ctx({ run }));
@@ -109,7 +125,7 @@ describe("endRelease", () => {
   });
 
   it("핫픽스는 main·develop으로 PR을 만든다", () => {
-    const { run, calls } = fakeRun({ "gh release view 1.5.1": '{"body":"요약"}' });
+    const { run, calls } = fakeRun({ "gh api repos/o/r/releases --paginate": '{"id":8,"body":"요약","isDraft":true,"isPrerelease":false}' });
     endRelease(ctx({ run, version: "1.5.1", ref: "hotfix/login" }));
     expect(calls.filter((c) => c.startsWith("gh pr create"))).toHaveLength(2);
   });
@@ -117,24 +133,24 @@ describe("endRelease", () => {
 
 describe("publishRelease", () => {
   it("본문이 null이어도 'null' 글자가 들어가지 않는다", () => {
-    const { run } = fakeRun({ "gh release view 1.5.0": '{"body":null,"isPrerelease":true}' });
+    const { run } = fakeRun({ "gh api repos/o/r/releases --paginate": '{"id":7,"body":null,"isDraft":false,"isPrerelease":true}' });
     let written = "";
     publishRelease(ctx({ run, facts: { build: 48 }, writeFile: (t) => { written = t; return "/tmp/body.md"; } }));
     expect(written).not.toContain("null");
   });
 
   it("사이클 정보를 앞에 붙이고 공개한다", () => {
-    const { run, calls } = fakeRun({ "gh release view 1.5.0": '{"body":"요약","isPrerelease":true}' });
+    const { run, calls } = fakeRun({ "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":false,"isPrerelease":true}' });
     publishRelease(ctx({ run, facts: { build: 48, startedAt: "2026-10-24", endedAt: "2026-10-27", releasedAt: "2026-10-28", testBuilds: 3, fixes: 2 } }));
     expect(calls.at(-1)).toBe(
-      "gh release edit 1.5.0 -R o/r --draft=false --prerelease=false --latest --title 1.5.0 · 빌드 48 --notes-file /tmp/body.md",
+      "gh api -X PATCH repos/o/r/releases/7 -f make_latest=true -f name=1.5.0 · 빌드 48 -F draft=false -F prerelease=false -F body=@/tmp/body.md",
     );
   });
 
   it("이미 공개됐으면 아무것도 안 한다", () => {
-    const { run, calls } = fakeRun({ "gh release view 1.5.0": '{"body":"요약","isPrerelease":false,"isDraft":false}' });
+    const { run, calls } = fakeRun({ "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":false,"isPrerelease":false}' });
     publishRelease(ctx({ run, facts: { build: 48 } }));
-    expect(calls.some((c) => c.startsWith("gh release edit"))).toBe(false);
+    expect(calls.some((c) => c.startsWith("gh api -X PATCH"))).toBe(false);
   });
 });
 
