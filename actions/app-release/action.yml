@@ -1,0 +1,37 @@
+name: "App release"
+description: "앱 릴리즈 노트·태그 처리. start(초안) | end(태그·프리릴리즈·백머지) | publish(배포 요약·공개)"
+
+inputs:
+  stage: { description: "start | end | publish", required: true }
+  version: { description: "출시 버전", required: true }
+  ref: { description: "빌드한 ref", default: "main" }
+  from_ref: { description: "직전 출시 릴리즈 태그", default: "" }
+  start_ref: { description: "사이클 시작 커밋", default: "" }
+  final_ref: { description: "최종 빌드 커밋", default: "" }
+  facts: { description: "publish: 사이클 정보 JSON", default: "{}" }
+  openai_api_key: { description: "start 요약용 (없으면 원문 노트)", default: "" }
+  token: { description: "gh(릴리즈·PR) 토큰. 기본 GITHUB_TOKEN으로 만든 PR은 다른 워크플로(main-gate·test)를 실행하지 않으므로 PAT/App 토큰을 넘긴다", default: "${{ github.token }}" }
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        APP_VERSION: ${{ inputs.version }}
+        APP_REF: ${{ inputs.ref }}
+        APP_FROM_REF: ${{ inputs.from_ref }}
+        APP_START_REF: ${{ inputs.start_ref }}
+        APP_FINAL_REF: ${{ inputs.final_ref }}
+        APP_FACTS: ${{ inputs.facts }}
+      run: node "$GITHUB_ACTION_PATH/../../packages/core/scripts/app-release.mjs" "${{ inputs.stage }}"

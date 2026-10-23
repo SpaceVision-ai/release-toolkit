@@ -1,0 +1,54 @@
+name: "App release cycle"
+description: "앱 빌드 단계 판별(decide) 또는 main PR 검사(gate). 호출 전에 fetch-depth: 0 체크아웃 필요"
+
+inputs:
+  mode:
+    description: "decide | gate"
+    required: true
+  ref:
+    description: "decide: 빌드할 ref (main 또는 hotfix/*)"
+    default: ""
+  bump:
+    description: "decide: major | minor | patch | skip"
+    default: "skip"
+  complete:
+    description: "decide: 테스트 완료 체크"
+    default: "false"
+  build_number:
+    description: "decide: 이번 빌드 번호"
+    default: ""
+  head_ref:
+    description: "gate: PR head 브랜치 이름"
+    default: ""
+  head_sha:
+    description: "gate: PR head 커밋 (핫픽스는 이 커밋에 -end가 있어야 통과). pull_request 체크아웃의 HEAD는 머지 커밋이라 따로 받는다"
+    default: ""
+
+outputs:
+  stage: { description: "start | mid | end", value: "${{ steps.run.outputs.stage }}" }
+  version: { description: "출시 버전", value: "${{ steps.run.outputs.version }}" }
+  build_tag: { description: "이번 빌드 태그", value: "${{ steps.run.outputs.build_tag }}" }
+  build: { description: "빌드 필요 여부 true|false", value: "${{ steps.run.outputs.build }}" }
+  start_ref: { description: "사이클 시작 커밋", value: "${{ steps.run.outputs.start_ref }}" }
+  final_ref: { description: "이번 빌드(또는 최종) 커밋", value: "${{ steps.run.outputs.final_ref }}" }
+  from_ref: { description: "직전 출시 릴리즈 태그", value: "${{ steps.run.outputs.from_ref }}" }
+  recommended_bump: { description: "커밋 규칙상 권장 올림 폭", value: "${{ steps.run.outputs.recommended_bump }}" }
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - id: run
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        APP_REF: ${{ inputs.ref }}
+        APP_BUMP: ${{ inputs.bump }}
+        APP_COMPLETE: ${{ inputs.complete }}
+        APP_BUILD_NUMBER: ${{ inputs.build_number }}
+        APP_HEAD_REF: ${{ inputs.head_ref }}
+        APP_HEAD_SHA: ${{ inputs.head_sha }}
+      run: node "$GITHUB_ACTION_PATH/../../packages/core/scripts/app-cycle.mjs" "${{ inputs.mode }}"
