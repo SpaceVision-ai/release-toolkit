@@ -1,4 +1,8 @@
 // 앱 릴리즈 사이클 판별. 단계를 사람이 고르지 않고 태그·릴리즈 상태·입력으로 정한다.
+import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { parseCommits, readCommitLines, recommendBump } from "./app-release-notes.mjs";
 import { bumpVersion, compareVersion, parseTags, sortBuilds } from "./app-version.mjs";
 
 const fail = (message) => ({ stage: "fail", message });
@@ -105,4 +109,76 @@ export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded }) {
     return hotfixEnded ? { allow: true } : deny("핫픽스 사이클을 종료(-end)한 뒤에 머지하세요");
   }
   return deny(`main에는 develop, fix/, hotfix/만 머지할 수 있습니다: ${headRef}`);
+}
+
+// ---- CLI ----
+const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf-8" }).trim();
+
+// 초안까지 포함해야 하므로 releases API 목록을 쓴다 (tags/{tag} 엔드포인트는 초안을 돌려주지 않는다).
+function readReleaseStates(repo) {
+  const out = sh("gh", [
+    "api", `repos/${repo}/releases`, "--paginate",
+    "--jq", '.[] | [.tag_name, (if .draft then "draft" elif .prerelease then "prerelease" else "published" end)] | @tsv',
+  ]);
+  return Object.fromEntries(out.split("\n").filter(Boolean).map((l) => l.split("\t")));
+}
+
+function writeOutputs(obj) {
+  const file = process.env.GITHUB_OUTPUT;
+  const lines = Object.entries(obj).map(([k, v]) => `${k}=${v ?? ""}`).join("\n");
+  if (file) appendFileSync(file, `${lines}\n`);
+  else process.stdout.write(`${lines}\n`);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  const mode = process.argv[2];
+  const repo = process.env.GITHUB_REPOSITORY;
+  const tags = sh("git", ["tag", "--merged", "HEAD"]).split("\n").filter(Boolean);
+  const releaseStates = readReleaseStates(repo);
+
+  if (mode === "decide") {
+    const result = decide({
+      ref: process.env.APP_REF,
+      bump: process.env.APP_BUMP ?? "skip",
+      complete: process.env.APP_COMPLETE === "true",
+      head: sh("git", ["rev-parse", "HEAD"]),
+      buildNumber: Number(process.env.APP_BUILD_NUMBER),
+      tags,
+      releaseStates,
+      commitOf: (t) => sh("git", ["rev-list", "-n1", t]),
+    });
+    if (result.stage === "fail") {
+      console.log(`::error::${result.message}`);
+      process.exit(1);
+    }
+    const recommended = recommendBump(parseCommits(readCommitLines(result.fromRef, result.finalRef)));
+    writeOutputs({
+      stage: result.stage, version: result.version, build_tag: result.buildTag,
+      build: String(result.build), start_ref: result.startRef, final_ref: result.finalRef,
+      from_ref: result.fromRef, recommended_bump: recommended,
+    });
+  } else if (mode === "gate") {
+    const headRef = process.env.APP_HEAD_REF;
+    const developOnly = sh("git", ["rev-list", "origin/main..origin/develop"]).split("\n").filter(Boolean);
+    const prCommits = sh("git", ["rev-list", "origin/main..HEAD"]).split("\n").filter(Boolean);
+    const mainTags = sh("git", ["tag", "--merged", "origin/main"]).split("\n").filter(Boolean);
+    // 핫픽스 가지에서만 찍힌 -end가 있으면 종료된 것. 버전을 "최신 공개 + patch"로 다시 계산하면
+    // 핫픽스 PR 머지 전에 그 버전이 먼저 공개됐을 때 다음 버전을 찾아 영원히 거부하게 된다.
+    const branchOnly = tags.filter((t) => !mainTags.includes(t));
+    const hotfixEnded = parseTags(branchOnly).builds.some((b) => b.kind === "end");
+    const result = gate({
+      state: mainState(mainTags, releaseStates),
+      headRef,
+      hasDevelopOnlyCommits: prCommits.some((c) => developOnly.includes(c)),
+      hotfixEnded,
+    });
+    if (!result.allow) {
+      console.log(`::error::${result.reason}`);
+      process.exit(1);
+    }
+    console.log(`허용: ${headRef}`);
+  } else {
+    console.error("usage: app-cycle.mjs decide|gate");
+    process.exit(2);
+  }
 }
