@@ -11,15 +11,19 @@ import { publishRelease } from "./app-release.mjs";
 import { parseCommits, readCommitLines } from "./app-release-notes.mjs";
 import { parseTags, sortBuilds } from "./app-version.mjs";
 
+// ios·android는 스토어가 준 원래 값(문자열 또는 숫자). 숫자로 못 읽으면 원문을 그대로 알린다.
 export function judge({ ios, android, tags }) {
   if (ios == null || android == null) return { action: "wait", reason: `한쪽만 조회됨 (iOS ${ios ?? "-"}, Android ${android ?? "-"})` };
-  if (ios !== android) return { action: "warn", reason: `플랫폼별 출시 빌드가 다릅니다 (iOS ${ios}, Android ${android})` };
+  const [iosBuild, androidBuild] = [Number(ios), Number(android)];
+  if (Number.isNaN(iosBuild) || Number.isNaN(androidBuild))
+    return { action: "warn", reason: `스토어 빌드 번호를 숫자로 읽지 못했습니다 (iOS ${ios}, Android ${android})` };
+  if (iosBuild !== androidBuild) return { action: "warn", reason: `플랫폼별 출시 빌드가 다릅니다 (iOS ${ios}, Android ${android})` };
   const { builds } = parseTags(tags);
-  const hit = builds.find((b) => b.build === ios);
-  if (!hit) return { action: "warn", reason: `빌드 ${ios}에 해당하는 빌드 태그가 없습니다` };
+  const hit = builds.find((b) => b.build === iosBuild);
+  if (!hit) return { action: "warn", reason: `빌드 ${iosBuild}에 해당하는 빌드 태그가 없습니다` };
   const last = sortBuilds(builds.filter((b) => b.version === hit.version)).at(-1);
-  const result = { action: "publish", version: hit.version, build: ios };
-  if (last?.kind === "end" && last.build !== ios) result.note = `출시된 빌드 ${ios}이 최종 빌드 ${last.build}과 다릅니다`;
+  const result = { action: "publish", version: hit.version, build: iosBuild };
+  if (last?.kind === "end" && last.build !== iosBuild) result.note = `출시된 빌드 ${iosBuild}이 최종 빌드 ${last.build}과 다릅니다`;
   return result;
 }
 
@@ -27,7 +31,8 @@ export function judge({ ios, android, tags }) {
 export function cycleFacts({ version, build, tags, tagDate, fixes, today }) {
   const line = sortBuilds(parseTags(tags).builds.filter((b) => b.version === version));
   const startIdx = line.map((b) => b.kind).lastIndexOf("start");
-  const round = line.slice(startIdx);
+  // -start가 없는 줄(예: 새 체계 이전 기준점 1.4.0.30-end)은 줄 전체를 한 회차로 본다.
+  const round = startIdx < 0 ? line : line.slice(startIdx);
   const end = round.find((b) => b.kind === "end");
   return {
     build,
@@ -52,14 +57,19 @@ export function signJwt(header, payload, privateKeyPem) {
 
 const now = () => Math.floor(Date.now() / 1000);
 
-async function getJson(url, init) {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${url} → ${res.status} ${await res.text()}`);
+async function getJson(url, init, fetchImpl = fetch) {
+  const res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) {
+    const err = new Error(`${init?.method ?? "GET"} ${url} → ${res.status} ${await res.text()}`);
+    err.status = res.status;
+    throw err;
+  }
   return res.status === 204 ? null : res.json();
 }
 
-// App Store: 판매 중 버전에 연결된 빌드 번호. 없으면 null.
-export async function iosReleasedBuild({ keyId, issuerId, privateKey, bundleId }) {
+// App Store: 판매 중 버전에 연결된 빌드 번호(원래 값). 없으면 null.
+// appStoreState 필터가 400이면(API 버전 차이) appVersionState로 한 번 다시 묻는다.
+export async function iosReleasedBuild({ keyId, issuerId, privateKey, bundleId, fetchImpl = fetch }) {
   const token = signJwt(
     { alg: "ES256", kid: keyId },
     { iss: issuerId, iat: now(), exp: now() + 1200, aud: "appstoreconnect-v1" },
@@ -67,15 +77,19 @@ export async function iosReleasedBuild({ keyId, issuerId, privateKey, bundleId }
   );
   const headers = { Authorization: `Bearer ${token}` };
   const base = "https://api.appstoreconnect.apple.com/v1";
-  const apps = await getJson(`${base}/apps?filter[bundleId]=${encodeURIComponent(bundleId)}`, { headers });
+  const apps = await getJson(`${base}/apps?filter[bundleId]=${encodeURIComponent(bundleId)}`, { headers }, fetchImpl);
   const appId = apps.data[0]?.id;
   if (!appId) throw new Error(`App Store에 번들 ${bundleId} 앱이 없습니다`);
-  const versions = await getJson(
-    `${base}/apps/${appId}/appStoreVersions?filter[appStoreState]=READY_FOR_SALE&include=build&limit=1`,
-    { headers },
-  );
+  const versionsUrl = (filter) => `${base}/apps/${appId}/appStoreVersions?${filter}&include=build&limit=1`;
+  let versions;
+  try {
+    versions = await getJson(versionsUrl("filter[appStoreState]=READY_FOR_SALE"), { headers }, fetchImpl);
+  } catch (err) {
+    if (err.status !== 400) throw err;
+    versions = await getJson(versionsUrl("filter[appVersionState]=READY_FOR_DISTRIBUTION"), { headers }, fetchImpl);
+  }
   const build = versions.included?.find((i) => i.type === "builds");
-  return build ? Number(build.attributes.version) : null;
+  return build ? build.attributes.version : null;
 }
 
 // Play: 프로덕션 트랙에서 완료(completed, 전체 배포)된 출시의 가장 큰 versionCode. 없으면 null.
@@ -137,7 +151,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     summary(`- ${result.note}`);
   }
 
-  const tagDate = (t) => sh("git", ["for-each-ref", `refs/tags/${t}`, "--format=%(taggerdate:short)"]).trim() || "-";
+  // creatordate는 annotated 태그면 태그 생성 시각, lightweight 태그면 커밋 시각을 준다.
+  const tagDate = (t) => sh("git", ["for-each-ref", `refs/tags/${t}`, "--format=%(creatordate:short)"]).trim() || "-";
   const startTag = parseTags(tags).builds
     .filter((b) => b.version === result.version && b.kind === "start")
     .sort((a, b) => a.build - b.build)
