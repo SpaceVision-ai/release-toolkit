@@ -1,6 +1,7 @@
 // packages/core/tests/app-store-sync.test.mjs
 import { describe, it, expect } from "vitest";
-import { judge, cycleFacts } from "../scripts/app-store-sync.mjs";
+import { generateKeyPairSync, createVerify } from "node:crypto";
+import { judge, cycleFacts, signJwt } from "../scripts/app-store-sync.mjs";
 
 const tags = ["1.4.0", "1.4.0.30-end", "1.5.0", "1.5.0.45-start", "1.5.0.46", "1.5.0.48", "1.5.0.48-end"];
 
@@ -30,5 +31,26 @@ describe("cycleFacts", () => {
     expect(
       cycleFacts({ version: "1.5.0", build: 48, tags, tagDate: (t) => dates[t], fixes: 2, today: "2026-10-28" }),
     ).toEqual({ build: 48, startedAt: "2026-10-24", endedAt: "2026-10-27", releasedAt: "2026-10-28", testBuilds: 3, fixes: 2 });
+  });
+});
+
+describe("signJwt", () => {
+  it("ES256 서명은 64바이트(ieee-p1363)이고 헤더·페이로드가 그대로 들어간다", () => {
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const pem = privateKey.export({ type: "pkcs8", format: "pem" });
+    const jwt = signJwt({ alg: "ES256", kid: "K" }, { iss: "I" }, pem);
+    const [h, p, s] = jwt.split(".");
+    expect(JSON.parse(Buffer.from(h, "base64url"))).toEqual({ alg: "ES256", kid: "K", typ: "JWT" });
+    expect(JSON.parse(Buffer.from(p, "base64url"))).toEqual({ iss: "I" });
+    expect(Buffer.from(s, "base64url")).toHaveLength(64);
+  });
+
+  it("RS256 서명은 공개키로 검증된다", () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const pem = privateKey.export({ type: "pkcs8", format: "pem" });
+    const jwt = signJwt({ alg: "RS256" }, { a: 1 }, pem);
+    const [h, p, s] = jwt.split(".");
+    const v = createVerify("RSA-SHA256").update(`${h}.${p}`);
+    expect(v.verify(publicKey, Buffer.from(s, "base64url"))).toBe(true);
   });
 });
