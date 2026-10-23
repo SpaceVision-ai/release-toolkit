@@ -1,0 +1,29 @@
+name: "App store sync"
+description: "두 스토어 출시 빌드가 같으면 해당 버전 GitHub 프리릴리즈를 배포 요약과 함께 공개. fetch-depth: 0 체크아웃 필요"
+
+inputs:
+  ios_bundle_id: { description: "iOS 번들 ID", required: true }
+  android_package: { description: "Android 패키지", required: true }
+  asc_key_id: { description: "App Store Connect API 키 ID", required: true }
+  asc_issuer_id: { description: "App Store Connect issuer ID", required: true }
+  asc_private_key: { description: "App Store Connect API 개인키(p8)", required: true }
+  play_service_account_json: { description: "Play 서비스 계정 JSON", required: true }
+  token: { description: "릴리즈 수정 토큰", default: "${{ github.token }}" }
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        IOS_BUNDLE_ID: ${{ inputs.ios_bundle_id }}
+        ANDROID_PACKAGE: ${{ inputs.android_package }}
+        ASC_KEY_ID: ${{ inputs.asc_key_id }}
+        ASC_ISSUER_ID: ${{ inputs.asc_issuer_id }}
+        ASC_PRIVATE_KEY: ${{ inputs.asc_private_key }}
+        PLAY_SERVICE_ACCOUNT_JSON: ${{ inputs.play_service_account_json }}
+      run: node "$GITHUB_ACTION_PATH/../../packages/core/scripts/app-store-sync.mjs"
