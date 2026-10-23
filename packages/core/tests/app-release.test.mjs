@@ -28,6 +28,15 @@ const ctx = (over = {}) => ({
 });
 
 describe("startRelease", () => {
+  it("범위에 커밋이 없으면 AI에 보내지 않고 '변경 사항 없음'을 쓴다", () => {
+    const { run } = fakeRun({ "git log": "", "gh release view 1.5.0": new Error("not found") });
+    let polished = 0;
+    let written = "";
+    startRelease(ctx({ run, polish: () => { polished++; return "x"; }, writeFile: (t) => { written = t; return "/tmp/body.md"; } }));
+    expect(polished).toBe(0);
+    expect(written.startsWith("변경 사항 없음")).toBe(true);
+  });
+
   it("릴리즈가 없으면 초안을 만든다", () => {
     const { run, calls } = fakeRun({
       "git log 1.4.0..S": "aaaaaaa1\tfeat: 기능\n",
@@ -94,6 +103,7 @@ describe("endRelease", () => {
     });
     const result = endRelease(ctx({ run }));
     expect(calls).toContain("git merge --abort");
+    expect(calls).toContain("git push origin +origin/main:refs/heads/chore/backmerge-1.5.0");
     expect(calls).toContain("gh pr create -R o/r --base develop --head chore/backmerge-1.5.0 --title chore: main 백머지 (1.5.0) --body 테스트 종료 백머지에서 충돌이 나 PR로 올립니다.");
     expect(result.backMerge).toBe("pr");
   });
@@ -106,6 +116,13 @@ describe("endRelease", () => {
 });
 
 describe("publishRelease", () => {
+  it("본문이 null이어도 'null' 글자가 들어가지 않는다", () => {
+    const { run } = fakeRun({ "gh release view 1.5.0": '{"body":null,"isPrerelease":true}' });
+    let written = "";
+    publishRelease(ctx({ run, facts: { build: 48 }, writeFile: (t) => { written = t; return "/tmp/body.md"; } }));
+    expect(written).not.toContain("null");
+  });
+
   it("사이클 정보를 앞에 붙이고 공개한다", () => {
     const { run, calls } = fakeRun({ "gh release view 1.5.0": '{"body":"요약","isPrerelease":true}' });
     publishRelease(ctx({ run, facts: { build: 48, startedAt: "2026-10-24", endedAt: "2026-10-27", releasedAt: "2026-10-28", testBuilds: 3, fixes: 2 } }));

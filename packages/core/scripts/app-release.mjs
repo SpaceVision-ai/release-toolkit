@@ -22,9 +22,11 @@ const viewRelease = (run, repo, version) => {
 };
 
 export function startRelease({ run, repo, version, fromRef, startRef, polish, writeFile }) {
-  const raw = notesFor(run, repo, fromRef, startRef) || "변경 사항 없음";
+  const raw = notesFor(run, repo, fromRef, startRef);
   const compare = fromRef ? `\n\n**전체 변경 비교**: [\`${fromRef}...${startRef.slice(0, 7)}\`](https://github.com/${repo}/compare/${fromRef}...${startRef})` : "";
-  const file = writeFile(`${polish(version, raw)}${compare}`);
+  // 커밋이 없으면 AI에 보낼 내용이 없다.
+  const summary = raw ? polish(version, raw) : "변경 사항 없음";
+  const file = writeFile(`${summary}${compare}`);
   if (viewRelease(run, repo, version)) {
     run("gh", ["release", "edit", version, "-R", repo, "--notes-file", file]);
   } else {
@@ -62,7 +64,8 @@ function backMerge(run, repo, version, ref) {
   } catch {
     run("git", ["merge", "--abort"]);
     const branch = `chore/backmerge-${version}`;
-    run("git", ["push", "origin", `origin/main:refs/heads/${branch}`]);
+    // 다시 실행할 때 main이 움직였어도 거부되지 않게 강제로 맞춘다 (CI가 만든 임시 브랜치).
+    run("git", ["push", "origin", `+origin/main:refs/heads/${branch}`]);
     createPr(run, ["-R", repo, "--base", "develop", "--head", branch, "--title", title, "--body", "테스트 종료 백머지에서 충돌이 나 PR로 올립니다."]);
     return "pr";
   }
@@ -102,7 +105,7 @@ export function factsBlock({ build, startedAt, endedAt, releasedAt, testBuilds, 
 export function publishRelease({ run, repo, version, facts, writeFile }) {
   const current = viewRelease(run, repo, version);
   if (!current || (!current.isPrerelease && !current.isDraft)) return { published: false };
-  const file = writeFile(`${factsBlock(facts)}\n\n${current.body}`);
+  const file = writeFile(`${factsBlock(facts)}\n\n${current.body ?? ""}`);
   run("gh", ["release", "edit", version, "-R", repo, "--draft=false", "--prerelease=false", "--latest", "--title", `${version} · 빌드 ${facts.build}`, "--notes-file", file]);
   return { published: true };
 }
