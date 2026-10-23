@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide, gate, mainState } from "../scripts/app-cycle.mjs";
+import { decide, gate, hotfixEndedAt, mainState } from "../scripts/app-cycle.mjs";
 
 // 태그 → 커밋. head는 기본 "H".
 const base = (over = {}) => ({
@@ -99,6 +99,11 @@ describe("decide — 사이클 열림", () => {
     });
   });
 
+  it("열린 줄기에 -start가 없으면 멈추지 않고 실패로 알린다", () => {
+    const r = decide(open({ tags: ["1.4.0", "1.4.0.30-end", "1.5.0.46"], commitOf: () => "M" }));
+    expect(r).toEqual({ stage: "fail", message: "진행 중인 사이클에 -start 태그가 없습니다" });
+  });
+
   it("사이클 중 버전 올림을 고르면 실패", () => {
     expect(decide(open({ bump: "patch" })).stage).toBe("fail");
   });
@@ -168,5 +173,18 @@ describe("gate", () => {
   });
   it("그 밖의 브랜치는 거부", () => {
     expect(g("released", "feat/x").allow).toBe(false);
+  });
+});
+
+describe("hotfixEndedAt", () => {
+  const commitOf = (t) => ({ "1.5.1.53-start": "A", "1.5.1.54-end": "B" })[t];
+  it("-end 태그가 PR head 커밋에 있으면 true", () => {
+    expect(hotfixEndedAt(["1.5.1.53-start", "1.5.1.54-end"], "B", commitOf)).toBe(true);
+  });
+  it("-end 뒤에 커밋이 더 있으면 false", () => {
+    expect(hotfixEndedAt(["1.5.1.53-start", "1.5.1.54-end"], "C", commitOf)).toBe(false);
+  });
+  it("-end가 없으면 false", () => {
+    expect(hotfixEndedAt(["1.5.1.53-start"], "A", commitOf)).toBe(false);
   });
 });

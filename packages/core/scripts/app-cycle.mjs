@@ -69,6 +69,7 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, releaseSt
   const lastCommit = commitOf(last.tag);
   const changed = lastCommit !== head;
   const start = [...line].reverse().find((b) => b.kind === "start");
+  if (!start) return fail("진행 중인 사이클에 -start 태그가 없습니다");
   const common = {
     version,
     startRef: commitOf(start.tag),
@@ -91,6 +92,12 @@ export function mainState(tags, releaseStates) {
   const last = sortBuilds(builds.filter((b) => b.version === version)).at(-1);
   if (last && last.kind !== "end") return "testing";
   return releaseStates[version] === "published" || !last ? "released" : "waiting";
+}
+
+// 핫픽스 가지의 -end 태그가 PR head 커밋을 그대로 가리킬 때만 종료로 본다.
+// -end 뒤에 커밋이 더 붙었으면 그 커밋은 테스트되지 않았으므로 머지를 막는다.
+export function hotfixEndedAt(branchOnlyTags, headSha, commitOf) {
+  return parseTags(branchOnlyTags).builds.some((b) => b.kind === "end" && commitOf(b.tag) === headSha);
 }
 
 export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded }) {
@@ -130,9 +137,19 @@ function writeOutputs(obj) {
   else process.stdout.write(`${lines}\n`);
 }
 
+const die = (message) => {
+  console.log(`::error::${message}`);
+  process.exit(1);
+};
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const mode = process.argv[2];
   const repo = process.env.GITHUB_REPOSITORY;
+  if (!repo) die("GITHUB_REPOSITORY가 비어 있습니다");
+  if (mode === "decide") {
+    if (!process.env.APP_REF) die("APP_REF(빌드할 ref)가 비어 있습니다");
+    if (!/^[1-9]\d*$/.test(process.env.APP_BUILD_NUMBER ?? "")) die(`APP_BUILD_NUMBER가 양의 정수가 아닙니다: ${process.env.APP_BUILD_NUMBER ?? ""}`);
+  }
   const tags = sh("git", ["tag", "--merged", "HEAD"]).split("\n").filter(Boolean);
   const releaseStates = readReleaseStates(repo);
 
@@ -165,7 +182,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     // 핫픽스 가지에서만 찍힌 -end가 있으면 종료된 것. 버전을 "최신 공개 + patch"로 다시 계산하면
     // 핫픽스 PR 머지 전에 그 버전이 먼저 공개됐을 때 다음 버전을 찾아 영원히 거부하게 된다.
     const branchOnly = tags.filter((t) => !mainTags.includes(t));
-    const hotfixEnded = parseTags(branchOnly).builds.some((b) => b.kind === "end");
+    // pull_request 체크아웃의 HEAD는 머지 커밋이라, PR head SHA는 APP_HEAD_SHA로 받는다.
+    const headSha = process.env.APP_HEAD_SHA || sh("git", ["rev-parse", "HEAD"]);
+    const hotfixEnded = hotfixEndedAt(branchOnly, headSha, (t) => sh("git", ["rev-list", "-n1", t]));
     const result = gate({
       state: mainState(mainTags, releaseStates),
       headRef,
