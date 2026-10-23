@@ -1,7 +1,14 @@
 // packages/core/scripts/app-store-sync.mjs
 // 스토어에 출시된 빌드를 확인해 GitHub 프리릴리즈를 공개할지 정한다.
 // 출시 확인 = iOS·Android가 같은 빌드를 출시함 (설계 D9).
+import { execFileSync } from "node:child_process";
 import { sign } from "node:crypto";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { publishRelease } from "./app-release.mjs";
+import { parseCommits, readCommitLines } from "./app-release-notes.mjs";
 import { parseTags, sortBuilds } from "./app-version.mjs";
 
 export function judge({ ios, android, tags }) {
@@ -104,4 +111,58 @@ export async function androidReleasedBuild({ serviceAccountJson, packageName }) 
   } finally {
     await getJson(`${base}/edits/${edit.id}`, { method: "DELETE", headers }).catch(() => {});
   }
+}
+
+// ---- CLI ----
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  const sh = (cmd, args, opts) => execFileSync(cmd, args, { encoding: "utf-8", ...opts });
+  const env = process.env;
+  const summary = (line) => env.GITHUB_STEP_SUMMARY && appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`);
+
+  const [ios, android] = await Promise.all([
+    iosReleasedBuild({ keyId: env.ASC_KEY_ID, issuerId: env.ASC_ISSUER_ID, privateKey: env.ASC_PRIVATE_KEY, bundleId: env.IOS_BUNDLE_ID }),
+    androidReleasedBuild({ serviceAccountJson: env.PLAY_SERVICE_ACCOUNT_JSON, packageName: env.ANDROID_PACKAGE }),
+  ]);
+  const tags = sh("git", ["tag"]).split("\n").filter(Boolean);
+  const result = judge({ ios, android, tags });
+  summary(`- 출시 빌드: iOS ${ios ?? "-"}, Android ${android ?? "-"}`);
+
+  if (result.action !== "publish") {
+    if (result.action === "warn") console.log(`::warning::${result.reason}`);
+    summary(`- ${result.reason}`);
+    process.exit(0);
+  }
+  if (result.note) {
+    console.log(`::warning::${result.note}`);
+    summary(`- ${result.note}`);
+  }
+
+  const tagDate = (t) => sh("git", ["for-each-ref", `refs/tags/${t}`, "--format=%(taggerdate:short)"]).trim() || "-";
+  const startTag = parseTags(tags).builds
+    .filter((b) => b.version === result.version && b.kind === "start")
+    .sort((a, b) => a.build - b.build)
+    .at(-1);
+  const fixes = startTag ? parseCommits(readCommitLines(startTag.tag, result.version, sh)).length : 0;
+  const facts = cycleFacts({
+    version: result.version,
+    build: result.build,
+    tags,
+    tagDate,
+    fixes,
+    today: new Date().toISOString().slice(0, 10),
+  });
+
+  const dir = mkdtempSync(join(tmpdir(), "store-sync-"));
+  const { published } = publishRelease({
+    run: sh,
+    repo: env.GITHUB_REPOSITORY,
+    version: result.version,
+    facts,
+    writeFile: (text) => {
+      const f = join(dir, "body.md");
+      writeFileSync(f, text);
+      return f;
+    },
+  });
+  summary(published ? `- **${result.version} 공개** (빌드 ${result.build})` : `- ${result.version}은 이미 공개됨`);
 }
