@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide } from "../scripts/app-cycle.mjs";
+import { decide, gate, mainState } from "../scripts/app-cycle.mjs";
 
 // 태그 → 커밋. head는 기본 "H".
 const base = (over = {}) => ({
@@ -131,5 +131,42 @@ describe("decide — 핫픽스", () => {
   it("핫픽스에서 버전 올림을 고르면 실패", () => {
     const r = decide(base({ ref: "hotfix/x", bump: "minor" }));
     expect(r.stage).toBe("fail");
+  });
+});
+
+describe("mainState", () => {
+  const rs = { "1.4.0": "published", "1.5.0": "prerelease" };
+  it("열린 사이클이면 testing", () => {
+    expect(mainState(["1.4.0", "1.5.0.45-start"], rs)).toBe("testing");
+  });
+  it("종료됐고 프리릴리즈면 waiting", () => {
+    expect(mainState(["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"], rs)).toBe("waiting");
+  });
+  it("공개됐으면 released", () => {
+    expect(mainState(["1.4.0", "1.4.0.30-end"], rs)).toBe("released");
+  });
+});
+
+describe("gate", () => {
+  const g = (state, head, extra = {}) =>
+    gate({ state, headRef: head, hasDevelopOnlyCommits: false, hotfixEnded: false, ...extra });
+
+  it("released에서만 develop 허용", () => {
+    expect(g("released", "develop").allow).toBe(true);
+    expect(g("testing", "develop").allow).toBe(false);
+    expect(g("waiting", "develop").allow).toBe(false);
+  });
+  it("fix/는 testing·waiting에서 main 분기일 때만", () => {
+    expect(g("testing", "fix/a").allow).toBe(true);
+    expect(g("waiting", "fix/a").allow).toBe(true);
+    expect(g("released", "fix/a").allow).toBe(false);
+    expect(g("testing", "fix/a", { hasDevelopOnlyCommits: true }).allow).toBe(false);
+  });
+  it("hotfix/는 그 가지의 -end가 있을 때만, 상태 무관", () => {
+    expect(g("testing", "hotfix/a", { hotfixEnded: true }).allow).toBe(true);
+    expect(g("released", "hotfix/a").allow).toBe(false);
+  });
+  it("그 밖의 브랜치는 거부", () => {
+    expect(g("released", "feat/x").allow).toBe(false);
   });
 });

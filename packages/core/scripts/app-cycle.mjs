@@ -78,3 +78,31 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, releaseSt
   if (changed) return { stage: "end", ...common, buildTag: `${version}.${buildNumber}-end`, build: true, finalRef: head };
   return { stage: "end", ...common, buildTag: `${version}.${last.build}-end`, build: false, finalRef: lastCommit };
 }
+
+// main의 상태: testing(사이클 열림) / waiting(종료, 프리릴리즈) / released(공개 또는 태그 없음)
+export function mainState(tags, releaseStates) {
+  const { releases, builds } = parseTags(tags);
+  const version = lineVersion({ isHotfix: false, releases, builds, releaseStates });
+  if (!version) return "released";
+  const last = sortBuilds(builds.filter((b) => b.version === version)).at(-1);
+  if (last && last.kind !== "end") return "testing";
+  return releaseStates[version] === "published" || !last ? "released" : "waiting";
+}
+
+export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded }) {
+  const deny = (reason) => ({ allow: false, reason });
+  if (headRef === "develop") {
+    return state === "released"
+      ? { allow: true }
+      : deny(state === "testing" ? "테스트 중에는 develop을 main에 머지할 수 없습니다" : "출시 확인 전에는 develop을 main에 머지할 수 없습니다");
+  }
+  if (headRef.startsWith("fix/")) {
+    if (state === "released") return deny("출시 완료 상태입니다. 수정은 develop으로 보내고, 출시본 수정은 hotfix/로 하세요");
+    if (hasDevelopOnlyCommits) return deny("fix/는 main에서 분기해야 합니다 (develop에만 있는 커밋이 들어 있음)");
+    return { allow: true };
+  }
+  if (headRef.startsWith("hotfix/")) {
+    return hotfixEnded ? { allow: true } : deny("핫픽스 사이클을 종료(-end)한 뒤에 머지하세요");
+  }
+  return deny(`main에는 develop, fix/, hotfix/만 머지할 수 있습니다: ${headRef}`);
+}
