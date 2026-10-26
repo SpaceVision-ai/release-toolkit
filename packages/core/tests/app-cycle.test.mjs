@@ -11,6 +11,8 @@ const base = (over = {}) => ({
   tags: ["1.4.0", "1.4.0.30-end"],
   releaseStates: { "1.4.0": "published" },
   commitOf: (t) => ({ "1.4.0": "R", "1.4.0.30-end": "R" })[t],
+  allTags: undefined,
+  developSinceEnd: () => false,
   ...over,
 });
 
@@ -35,27 +37,38 @@ describe("decide — 사이클 닫힘", () => {
     expect(decide(base({ bump: "minor", complete: true })).stage).toBe("fail");
   });
 
-  it("출시 대기(프리릴리즈)면 skip으로 같은 버전 재테스트", () => {
-    const r = decide(
-      base({
-        tags: ["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"],
-        releaseStates: { "1.4.0": "published", "1.5.0": "prerelease" },
-        commitOf: () => "R",
-      }),
-    );
-    expect(r).toMatchObject({ stage: "start", version: "1.5.0", buildTag: "1.5.0.50-start", fromRef: "1.4.0" });
+  const pending = {
+    tags: ["1.4.0", "1.4.0.30-end", "1.5.0.40-start", "1.5.0.41-end"],
+    releaseStates: { "1.4.0": "published", "1.5.0": "prerelease" },
+    commitOf: (t) => ({ "1.4.0": "R", "1.4.0.30-end": "R", "1.5.0.40-start": "S", "1.5.0.41-end": "E" })[t],
+  };
+  it("공개 전 버전이 -end됐으면 버전을 올려 다음 테스트를 바로 시작한다", () => {
+    const r = decide(base({ ...pending, bump: "minor" }));
+    expect(r).toMatchObject({ stage: "start", version: "1.6.0", buildTag: "1.6.0.50-start", fromRef: "1.4.0" });
   });
-
-  it("출시 대기 중 버전을 올리면 실패", () => {
-    const r = decide(
-      base({
-        bump: "minor",
-        tags: ["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"],
-        releaseStates: { "1.4.0": "published", "1.5.0": "prerelease" },
-        commitOf: () => "R",
-      }),
-    );
+  it("공개 전 버전은 -end 뒤 develop이 없으면 skip으로 같은 버전 재테스트", () => {
+    const r = decide(base({ ...pending }));
+    expect(r).toMatchObject({ stage: "start", version: "1.5.0", buildTag: "1.5.0.50-start" });
+  });
+  it("-end 뒤 develop이 들어왔으면 skip은 실패 — 버전을 올려야 한다", () => {
+    const r = decide(base({ ...pending, developSinceEnd: () => true }));
     expect(r.stage).toBe("fail");
+    expect(r.message).toContain("1.5.0");
+  });
+  it("skip 판정은 마지막 -end 커밋을 기준으로 develop 여부를 본다", () => {
+    let seen = null;
+    decide(base({ ...pending, developSinceEnd: (c) => { seen = c; return false; } }));
+    expect(seen).toBe("E");
+  });
+  it("skip 판정 때만 develop 여부를 본다 (버전 올림은 보지 않는다)", () => {
+    let called = false;
+    decide(base({ ...pending, bump: "minor", developSinceEnd: () => { called = true; return true; } }));
+    expect(called).toBe(false);
+  });
+  it("올린 버전에 어디든 빌드 태그가 있으면 실패 — 머지 전 핫픽스와 겹침", () => {
+    const r = decide(base({ bump: "patch", allTags: ["1.4.0", "1.4.0.30-end", "1.4.1.45-start"] }));
+    expect(r.stage).toBe("fail");
+    expect(r.message).toContain("1.4.1");
   });
 
   it("올린 버전이 이미 공개된 릴리즈면 실패 (머지 전 공개된 핫픽스와 겹침)", () => {
