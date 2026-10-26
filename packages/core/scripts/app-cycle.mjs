@@ -6,6 +6,7 @@ import { parseCommits, readCommitLines, recommendBump } from "./app-release-note
 import { bumpVersion, compareVersion, parseTags, sortBuilds } from "./app-version.mjs";
 
 const fail = (message) => ({ stage: "fail", message });
+const hasBuildTags = (tags, version) => parseTags(tags).builds.some((b) => b.version === version);
 
 function latestPublishedBelow(releases, releaseStates, version) {
   return (
@@ -16,21 +17,38 @@ function latestPublishedBelow(releases, releaseStates, version) {
   );
 }
 
-// 줄기 버전: main은 도달 가능한 빌드 태그 중 가장 높은 버전(없으면 최신 공개 릴리즈),
-// hotfix/*는 최신 공개 릴리즈 + patch. 핫픽스가 main에 머지돼도 열린 상위 버전 사이클을 놓치지 않는다.
-function lineVersion({ isHotfix, releases, builds, releaseStates }) {
+// main 줄기 버전: 도달 가능한 빌드 태그 중 가장 높은 버전(없으면 최신 공개 릴리즈).
+// 핫픽스가 main에 머지돼도 열린 상위 버전 사이클을 놓치지 않는다. 핫픽스 줄기는 hotfixVersion이 정한다
+function lineVersion({ releases, builds, releaseStates }) {
   const published = releases.filter((r) => releaseStates[r] === "published").sort(compareVersion);
-  if (isHotfix) return published.length ? bumpVersion(published.at(-1), "patch") : null;
   const versions = [...new Set(builds.map((b) => b.version))].sort(compareVersion);
   return versions.at(-1) ?? published.at(-1) ?? null;
 }
 
-export function decide({ ref, bump, complete, head, buildNumber, tags, releaseStates, commitOf }) {
+// 핫픽스 버전: 최신 공개 + patch부터, 그 버전의 빌드 태그가 없거나 모두 이 가지(HEAD에서 도달)의 것인 첫 patch.
+// main의 공개 전 버전과 겹치지 않고, 자기 태그 때문에 계속 밀리지도 않는다
+export function hotfixVersion({ releases, releaseStates, mergedTags, allTags }) {
+  const published = releases.filter((r) => releaseStates[r] === "published").sort(compareVersion);
+  if (!published.length) return null;
+  const mine = new Set(mergedTags);
+  const all = parseTags(allTags).builds;
+  let v = bumpVersion(published.at(-1), "patch");
+  for (;;) {
+    const owned = all.filter((b) => b.version === v);
+    if (owned.every((b) => mine.has(b.tag))) return v;
+    v = bumpVersion(v, "patch");
+  }
+}
+
+export function decide({ ref, bump, complete, head, buildNumber, tags, allTags = tags, releaseStates, commitOf, developSinceEnd = () => false }) {
   const isHotfix = ref.startsWith("hotfix/");
   if (!isHotfix && ref !== "main") return fail(`main 또는 hotfix/* 에서만 빌드할 수 있습니다: ${ref}`);
 
   const { releases, builds } = parseTags(tags);
-  const version = lineVersion({ isHotfix, releases, builds, releaseStates });
+  // 핫픽스 가지에서는 main의 태그가 보이지 않으므로 릴리즈·빌드 태그를 모든 태그에서 읽는다
+  const version = isHotfix
+    ? hotfixVersion({ releases: parseTags(allTags).releases, releaseStates, mergedTags: tags, allTags })
+    : lineVersion({ releases, builds, releaseStates });
   if (isHotfix && !version) return fail("핫픽스 기준이 될 출시 릴리즈가 없습니다");
   if (isHotfix && releaseStates[version] === "published")
     return fail(`${version}은 이미 출시됐습니다. 최신 출시 태그에서 새로 분기하세요`);
@@ -45,12 +63,21 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, releaseSt
     if (isHotfix) {
       if (bump !== "skip") return fail("핫픽스는 버전을 자동으로 정합니다. 버전 올림은 skip으로 두세요");
       next = version;
-    } else if (version && line.length && releaseStates[version] !== "published") {
-      if (bump !== "skip") return fail(`${version}이 출시 대기 중입니다. 같은 버전으로 재테스트하려면 skip을 고르세요`);
+    } else if (bump === "skip") {
+      // 같은 버전 재테스트: 공개 전이고, 그 버전 -end 뒤 main에 develop이 들어오지 않았을 때만.
+      // 다음 버전 코드가 섞인 main으로 지난 번호를 다시 빌드하지 않게 한다
+      if (!version || !line.length || releaseStates[version] === "published") {
+        return fail(`${version ?? "직전 버전"}은 이미 출시됐습니다. 버전 올림을 고르세요`);
+      }
+      if (developSinceEnd(commitOf(last.tag))) {
+        return fail(`${version} 이후 develop이 머지돼 같은 버전으로 다시 테스트할 수 없습니다. 버전을 올리세요`);
+      }
       next = version;
     } else {
-      if (bump === "skip") return fail(`${version ?? "직전 버전"}은 이미 출시됐습니다. 버전 올림을 고르세요`);
+      // -end 뒤에는 공개 전이어도 버전을 올려 다음 테스트를 연다 (공개 여부는 출시 콘솔이 다룬다)
       next = bumpVersion(version ?? "0.0.0", bump);
+      // 아직 main에 머지되지 않은 핫픽스가 이미 그 번호로 빌드했을 수 있다
+      if (hasBuildTags(allTags, next)) return fail(`${next}은 이미 빌드된 버전입니다(핫픽스 등). 더 높게 올리세요`);
     }
     // 핫픽스가 main에 머지되기 전에 공개되면, main에서 올린 버전이 그 핫픽스 버전과 같아질 수 있다.
     if (releaseStates[next] === "published") return fail(`${next}은 이미 출시된 버전입니다. 더 높게 올리세요`);
@@ -84,14 +111,14 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, releaseSt
   return { stage: "end", ...common, buildTag: `${version}.${last.build}-end`, build: false, finalRef: lastCommit };
 }
 
-// main의 상태: testing(사이클 열림) / waiting(종료, 프리릴리즈) / released(공개 또는 태그 없음)
+// main의 상태: testing(사이클 열림) / closed(그 밖). 공개 여부는 출시 콘솔이 다룬다 —
+// -end가 찍히면 공개 전이어도 다음 사이클을 열 수 있다
 export function mainState(tags, releaseStates) {
   const { releases, builds } = parseTags(tags);
-  const version = lineVersion({ isHotfix: false, releases, builds, releaseStates });
-  if (!version) return "released";
+  const version = lineVersion({ releases, builds, releaseStates });
+  if (!version) return "closed";
   const last = sortBuilds(builds.filter((b) => b.version === version)).at(-1);
-  if (last && last.kind !== "end") return "testing";
-  return releaseStates[version] === "published" || !last ? "released" : "waiting";
+  return last && last.kind !== "end" ? "testing" : "closed";
 }
 
 // 핫픽스 가지의 -end 태그가 PR head 커밋을 그대로 가리킬 때만 종료로 본다.
@@ -100,17 +127,25 @@ export function hotfixEndedAt(branchOnlyTags, headSha, commitOf) {
   return parseTags(branchOnlyTags).builds.some((b) => b.kind === "end" && commitOf(b.tag) === headSha);
 }
 
-export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded }) {
+// -end 이후 main 커밋을 PR head 브랜치로 분류한다. 스쿼시·리베이스 머지도 허용되므로 머지 커밋 부모로는 판정하지 않는다.
+// prHeadRefsOf(sha) = 그 커밋이 들어간 main 대상 PR들의 head ref. PR이 없는 커밋(직접 push)은 develop으로 본다.
+// hotfix/는 이미 출시된 코드의 수정이라 재테스트에 실려도 되므로 develop으로 보지 않는다
+const NOT_DEVELOP = ["fix/", "hotfix/"];
+export function classifyDevelopSinceEnd(commits, prHeadRefsOf) {
+  return commits.some((c) => !prHeadRefsOf(c).some((ref) => NOT_DEVELOP.some((p) => ref.startsWith(p))));
+}
+
+// developSinceEnd: 줄기 버전의 마지막 -end 이후 main에 fix/·hotfix/가 아닌 PR의 커밋이 들어왔는가 (지연 평가)
+export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded, lineUnpublished, developSinceEnd }) {
   const deny = (reason) => ({ allow: false, reason });
   if (headRef === "develop") {
-    return state === "released"
-      ? { allow: true }
-      : deny(state === "testing" ? "테스트 중에는 develop을 main에 머지할 수 없습니다" : "출시 확인 전에는 develop을 main에 머지할 수 없습니다");
+    return state === "testing" ? deny("테스트 중에는 develop을 main에 머지할 수 없습니다") : { allow: true };
   }
   if (headRef.startsWith("fix/")) {
-    if (state === "released") return deny("출시 완료 상태입니다. 수정은 develop으로 보내고, 출시본 수정은 hotfix/로 하세요");
     if (hasDevelopOnlyCommits) return deny("fix/는 main에서 분기해야 합니다 (develop에만 있는 커밋이 들어 있음)");
-    return { allow: true };
+    if (state === "testing") return { allow: true };
+    if (lineUnpublished && !developSinceEnd()) return { allow: true };
+    return deny("테스트가 닫혔습니다. 수정은 develop으로 보내고, 출시본 수정은 hotfix/로 하세요");
   }
   if (headRef.startsWith("hotfix/")) {
     return hotfixEnded ? { allow: true } : deny("핫픽스 사이클을 종료(-end)한 뒤에 머지하세요");
@@ -151,7 +186,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     if (!/^[1-9]\d*$/.test(process.env.APP_BUILD_NUMBER ?? "")) die(`APP_BUILD_NUMBER가 양의 정수가 아닙니다: ${process.env.APP_BUILD_NUMBER ?? ""}`);
   }
   const tags = sh("git", ["tag", "--merged", "HEAD"]).split("\n").filter(Boolean);
+  // 핫픽스 가지에서는 main의 태그가 HEAD에서 보이지 않으므로 모든 태그도 따로 읽는다 (호출 전 fetch 필요)
+  const allTags = sh("git", ["tag"]).split("\n").filter(Boolean);
   const releaseStates = readReleaseStates(repo);
+  const prHeadRefsOf = (sha) => {
+    try {
+      return sh("gh", ["api", `repos/${repo}/commits/${sha}/pulls`, "--jq", '.[] | select(.base.ref == "main") | .head.ref'])
+        .split("\n").filter(Boolean);
+    } catch (e) {
+      return die(`PR 조회 실패 (${sha}): ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  // endCommit..tip 사이 커밋에 fix/·hotfix/가 아닌 PR의 커밋이 있는가
+  const developSinceEndFrom = (tip) => (endCommit) =>
+    classifyDevelopSinceEnd(sh("git", ["rev-list", `${endCommit}..${tip}`]).split("\n").filter(Boolean), prHeadRefsOf);
 
   if (mode === "decide") {
     const result = decide({
@@ -161,8 +209,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       head: sh("git", ["rev-parse", "HEAD"]),
       buildNumber: Number(process.env.APP_BUILD_NUMBER),
       tags,
+      allTags,
       releaseStates,
       commitOf: (t) => sh("git", ["rev-list", "-n1", t]),
+      developSinceEnd: developSinceEndFrom("HEAD"),
     });
     if (result.stage === "fail") {
       console.log(`::error::${result.message}`);
@@ -185,11 +235,18 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     // pull_request 체크아웃의 HEAD는 머지 커밋이라, PR head SHA는 APP_HEAD_SHA로 받는다.
     const headSha = process.env.APP_HEAD_SHA || sh("git", ["rev-parse", "HEAD"]);
     const hotfixEnded = hotfixEndedAt(branchOnly, headSha, (t) => sh("git", ["rev-list", "-n1", t]));
+    // 줄기 버전이 -end로 닫혔고 공개 전이면 재테스트용 fix/를 받을 수 있다 (-end 뒤 develop이 없을 때만)
+    const mainBuilds = parseTags(mainTags).builds;
+    const lineV = [...new Set(mainBuilds.map((b) => b.version))].sort(compareVersion).at(-1) ?? null;
+    const lineLast = lineV ? sortBuilds(mainBuilds.filter((b) => b.version === lineV)).at(-1) : null;
+    const lineUnpublished = !!lineV && releaseStates[lineV] !== "published" && lineLast?.kind === "end";
     const result = gate({
       state: mainState(mainTags, releaseStates),
       headRef,
       hasDevelopOnlyCommits: prCommits.some((c) => developOnly.includes(c)),
       hotfixEnded,
+      lineUnpublished,
+      developSinceEnd: () => developSinceEndFrom("origin/main")(sh("git", ["rev-list", "-n1", lineLast.tag])),
     });
     if (!result.allow) {
       console.log(`::error::${result.reason}`);

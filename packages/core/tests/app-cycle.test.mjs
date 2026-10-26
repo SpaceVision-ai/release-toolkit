@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide, gate, hotfixEndedAt, mainState } from "../scripts/app-cycle.mjs";
+import { classifyDevelopSinceEnd, decide, gate, hotfixEndedAt, mainState } from "../scripts/app-cycle.mjs";
 
 // 태그 → 커밋. head는 기본 "H".
 const base = (over = {}) => ({
@@ -11,6 +11,8 @@ const base = (over = {}) => ({
   tags: ["1.4.0", "1.4.0.30-end"],
   releaseStates: { "1.4.0": "published" },
   commitOf: (t) => ({ "1.4.0": "R", "1.4.0.30-end": "R" })[t],
+  allTags: undefined,
+  developSinceEnd: () => false,
   ...over,
 });
 
@@ -35,27 +37,38 @@ describe("decide — 사이클 닫힘", () => {
     expect(decide(base({ bump: "minor", complete: true })).stage).toBe("fail");
   });
 
-  it("출시 대기(프리릴리즈)면 skip으로 같은 버전 재테스트", () => {
-    const r = decide(
-      base({
-        tags: ["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"],
-        releaseStates: { "1.4.0": "published", "1.5.0": "prerelease" },
-        commitOf: () => "R",
-      }),
-    );
-    expect(r).toMatchObject({ stage: "start", version: "1.5.0", buildTag: "1.5.0.50-start", fromRef: "1.4.0" });
+  const pending = {
+    tags: ["1.4.0", "1.4.0.30-end", "1.5.0.40-start", "1.5.0.41-end"],
+    releaseStates: { "1.4.0": "published", "1.5.0": "prerelease" },
+    commitOf: (t) => ({ "1.4.0": "R", "1.4.0.30-end": "R", "1.5.0.40-start": "S", "1.5.0.41-end": "E" })[t],
+  };
+  it("공개 전 버전이 -end됐으면 버전을 올려 다음 테스트를 바로 시작한다", () => {
+    const r = decide(base({ ...pending, bump: "minor" }));
+    expect(r).toMatchObject({ stage: "start", version: "1.6.0", buildTag: "1.6.0.50-start", fromRef: "1.4.0" });
   });
-
-  it("출시 대기 중 버전을 올리면 실패", () => {
-    const r = decide(
-      base({
-        bump: "minor",
-        tags: ["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"],
-        releaseStates: { "1.4.0": "published", "1.5.0": "prerelease" },
-        commitOf: () => "R",
-      }),
-    );
+  it("공개 전 버전은 -end 뒤 develop이 없으면 skip으로 같은 버전 재테스트", () => {
+    const r = decide(base({ ...pending }));
+    expect(r).toMatchObject({ stage: "start", version: "1.5.0", buildTag: "1.5.0.50-start" });
+  });
+  it("-end 뒤 develop이 들어왔으면 skip은 실패 — 버전을 올려야 한다", () => {
+    const r = decide(base({ ...pending, developSinceEnd: () => true }));
     expect(r.stage).toBe("fail");
+    expect(r.message).toContain("1.5.0");
+  });
+  it("skip 판정은 마지막 -end 커밋을 기준으로 develop 여부를 본다", () => {
+    let seen = null;
+    decide(base({ ...pending, developSinceEnd: (c) => { seen = c; return false; } }));
+    expect(seen).toBe("E");
+  });
+  it("skip 판정 때만 develop 여부를 본다 (버전 올림은 보지 않는다)", () => {
+    let called = false;
+    decide(base({ ...pending, bump: "minor", developSinceEnd: () => { called = true; return true; } }));
+    expect(called).toBe(false);
+  });
+  it("올린 버전에 어디든 빌드 태그가 있으면 실패 — 머지 전 핫픽스와 겹침", () => {
+    const r = decide(base({ bump: "patch", allTags: ["1.4.0", "1.4.0.30-end", "1.4.1.45-start"] }));
+    expect(r.stage).toBe("fail");
+    expect(r.message).toContain("1.4.1");
   });
 
   it("올린 버전이 이미 공개된 릴리즈면 실패 (머지 전 공개된 핫픽스와 겹침)", () => {
@@ -133,6 +146,29 @@ describe("decide — 핫픽스", () => {
     expect(r).toMatchObject({ stage: "start", version: "1.5.1", buildTag: "1.5.1.50-start", fromRef: "1.5.0" });
   });
 
+  it("공개 전 main 버전(1.4.1)과 겹치지 않게 1.4.2로 시작한다", () => {
+    const r = decide(base({
+      ref: "hotfix/a",
+      tags: ["1.4.0", "1.4.0.30-end"],
+      allTags: ["1.4.0", "1.4.0.30-end", "1.4.1.40-start", "1.4.1.41-end"],
+      releaseStates: { "1.4.0": "published", "1.4.1": "prerelease" },
+    }));
+    expect(r).toMatchObject({ stage: "start", version: "1.4.2", buildTag: "1.4.2.50-start" });
+  });
+
+  it("자기 가지의 태그 때문에 버전이 밀리지 않는다", () => {
+    const own = ["1.4.0", "1.4.0.30-end", "1.4.2.50-start"];
+    const r = decide(base({
+      ref: "hotfix/a",
+      head: "H2",
+      tags: own,
+      allTags: [...own, "1.4.1.40-start", "1.4.1.41-end"],
+      releaseStates: { "1.4.0": "published", "1.4.1": "prerelease" },
+      commitOf: (t) => ({ "1.4.2.50-start": "H" })[t] ?? "R",
+    }));
+    expect(r).toMatchObject({ stage: "mid", version: "1.4.2" });
+  });
+
   it("핫픽스에서 버전 올림을 고르면 실패", () => {
     const r = decide(base({ ref: "hotfix/x", bump: "minor" }));
     expect(r.stage).toBe("fail");
@@ -140,39 +176,49 @@ describe("decide — 핫픽스", () => {
 });
 
 describe("mainState", () => {
-  const rs = { "1.4.0": "published", "1.5.0": "prerelease" };
+  const states = { "1.4.0": "published", "1.5.0": "prerelease" };
   it("열린 사이클이면 testing", () => {
-    expect(mainState(["1.4.0", "1.5.0.45-start"], rs)).toBe("testing");
+    expect(mainState(["1.4.0", "1.4.0.30-end", "1.5.0.40-start"], states)).toBe("testing");
   });
-  it("종료됐고 프리릴리즈면 waiting", () => {
-    expect(mainState(["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"], rs)).toBe("waiting");
+  it("종료됐으면 공개 전이어도 closed (출시 대기 상태는 없다)", () => {
+    expect(mainState(["1.4.0", "1.5.0.40-start", "1.5.0.41-end"], states)).toBe("closed");
   });
-  it("공개됐으면 released", () => {
-    expect(mainState(["1.4.0", "1.4.0.30-end"], rs)).toBe("released");
+  it("공개됐으면 closed", () => {
+    expect(mainState(["1.4.0", "1.4.0.30-end"], states)).toBe("closed");
   });
 });
 
 describe("gate", () => {
-  const g = (state, head, extra = {}) =>
-    gate({ state, headRef: head, hasDevelopOnlyCommits: false, hotfixEnded: false, ...extra });
-
-  it("released에서만 develop 허용", () => {
-    expect(g("released", "develop").allow).toBe(true);
-    expect(g("testing", "develop").allow).toBe(false);
-    expect(g("waiting", "develop").allow).toBe(false);
+  const g = (over) => gate({
+    state: "closed", headRef: "develop", hasDevelopOnlyCommits: false, hotfixEnded: false,
+    lineUnpublished: false, developSinceEnd: () => false, ...over,
   });
-  it("fix/는 testing·waiting에서 main 분기일 때만", () => {
-    expect(g("testing", "fix/a").allow).toBe(true);
-    expect(g("waiting", "fix/a").allow).toBe(true);
-    expect(g("released", "fix/a").allow).toBe(false);
-    expect(g("testing", "fix/a", { hasDevelopOnlyCommits: true }).allow).toBe(false);
+  it("develop은 테스트 중에만 거부, 공개 전이어도 닫혀 있으면 허용", () => {
+    expect(g({ state: "testing" }).allow).toBe(false);
+    expect(g({ state: "closed", lineUnpublished: true }).allow).toBe(true);
+    expect(g({ state: "closed" }).allow).toBe(true);
+  });
+  it("fix/는 테스트 중이면 허용", () => {
+    expect(g({ state: "testing", headRef: "fix/a" }).allow).toBe(true);
+  });
+  it("fix/는 닫혔어도 줄기 버전이 공개 전이고 -end 뒤 develop이 없으면 허용(재테스트용)", () => {
+    expect(g({ headRef: "fix/a", lineUnpublished: true }).allow).toBe(true);
+  });
+  it("fix/는 -end 뒤 develop이 들어왔으면 거부", () => {
+    expect(g({ headRef: "fix/a", lineUnpublished: true, developSinceEnd: () => true }).allow).toBe(false);
+  });
+  it("fix/는 줄기 버전이 공개됐으면 거부", () => {
+    expect(g({ headRef: "fix/a", lineUnpublished: false }).allow).toBe(false);
+  });
+  it("fix/에 develop에만 있는 커밋이 있으면 거부", () => {
+    expect(g({ state: "testing", headRef: "fix/a", hasDevelopOnlyCommits: true }).allow).toBe(false);
   });
   it("hotfix/는 그 가지의 -end가 있을 때만, 상태 무관", () => {
-    expect(g("testing", "hotfix/a", { hotfixEnded: true }).allow).toBe(true);
-    expect(g("released", "hotfix/a").allow).toBe(false);
+    expect(g({ headRef: "hotfix/a", hotfixEnded: true }).allow).toBe(true);
+    expect(g({ state: "testing", headRef: "hotfix/a" }).allow).toBe(false);
   });
   it("그 밖의 브랜치는 거부", () => {
-    expect(g("released", "feat/x").allow).toBe(false);
+    expect(g({ headRef: "feat/a" }).allow).toBe(false);
   });
 });
 
@@ -186,5 +232,26 @@ describe("hotfixEndedAt", () => {
   });
   it("-end가 없으면 false", () => {
     expect(hotfixEndedAt(["1.5.1.53-start"], "A", commitOf)).toBe(false);
+  });
+});
+
+describe("classifyDevelopSinceEnd", () => {
+  it("모든 커밋이 main 대상 fix/ PR에서 왔으면 false", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], () => ["fix/x"])).toBe(false);
+  });
+  it("develop PR 커밋이 하나라도 있으면 true", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], (c) => (c === "b" ? ["develop"] : ["fix/x"]))).toBe(true);
+  });
+  it("PR이 연결되지 않은 커밋(직접 push)은 develop으로 본다", () => {
+    expect(classifyDevelopSinceEnd(["a"], () => [])).toBe(true);
+  });
+  it("커밋이 없으면 false", () => {
+    expect(classifyDevelopSinceEnd([], () => ["develop"])).toBe(false);
+  });
+  it("hotfix/ PR 커밋만 있으면 false — 출시된 코드의 수정은 develop이 아니다", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], () => ["hotfix/login"])).toBe(false);
+  });
+  it("hotfix/와 develop 커밋이 섞이면 true", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], (c) => (c === "a" ? ["hotfix/login"] : ["develop"]))).toBe(true);
   });
 });
