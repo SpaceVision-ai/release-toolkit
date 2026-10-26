@@ -140,39 +140,49 @@ describe("decide — 핫픽스", () => {
 });
 
 describe("mainState", () => {
-  const rs = { "1.4.0": "published", "1.5.0": "prerelease" };
+  const states = { "1.4.0": "published", "1.5.0": "prerelease" };
   it("열린 사이클이면 testing", () => {
-    expect(mainState(["1.4.0", "1.5.0.45-start"], rs)).toBe("testing");
+    expect(mainState(["1.4.0", "1.4.0.30-end", "1.5.0.40-start"], states)).toBe("testing");
   });
-  it("종료됐고 프리릴리즈면 waiting", () => {
-    expect(mainState(["1.4.0", "1.5.0", "1.5.0.45-start", "1.5.0.45-end"], rs)).toBe("waiting");
+  it("종료됐으면 공개 전이어도 closed (출시 대기 상태는 없다)", () => {
+    expect(mainState(["1.4.0", "1.5.0.40-start", "1.5.0.41-end"], states)).toBe("closed");
   });
-  it("공개됐으면 released", () => {
-    expect(mainState(["1.4.0", "1.4.0.30-end"], rs)).toBe("released");
+  it("공개됐으면 closed", () => {
+    expect(mainState(["1.4.0", "1.4.0.30-end"], states)).toBe("closed");
   });
 });
 
 describe("gate", () => {
-  const g = (state, head, extra = {}) =>
-    gate({ state, headRef: head, hasDevelopOnlyCommits: false, hotfixEnded: false, ...extra });
-
-  it("released에서만 develop 허용", () => {
-    expect(g("released", "develop").allow).toBe(true);
-    expect(g("testing", "develop").allow).toBe(false);
-    expect(g("waiting", "develop").allow).toBe(false);
+  const g = (over) => gate({
+    state: "closed", headRef: "develop", hasDevelopOnlyCommits: false, hotfixEnded: false,
+    lineUnpublished: false, developSinceEnd: () => false, ...over,
   });
-  it("fix/는 testing·waiting에서 main 분기일 때만", () => {
-    expect(g("testing", "fix/a").allow).toBe(true);
-    expect(g("waiting", "fix/a").allow).toBe(true);
-    expect(g("released", "fix/a").allow).toBe(false);
-    expect(g("testing", "fix/a", { hasDevelopOnlyCommits: true }).allow).toBe(false);
+  it("develop은 테스트 중에만 거부, 공개 전이어도 닫혀 있으면 허용", () => {
+    expect(g({ state: "testing" }).allow).toBe(false);
+    expect(g({ state: "closed", lineUnpublished: true }).allow).toBe(true);
+    expect(g({ state: "closed" }).allow).toBe(true);
+  });
+  it("fix/는 테스트 중이면 허용", () => {
+    expect(g({ state: "testing", headRef: "fix/a" }).allow).toBe(true);
+  });
+  it("fix/는 닫혔어도 줄기 버전이 공개 전이고 -end 뒤 develop이 없으면 허용(재테스트용)", () => {
+    expect(g({ headRef: "fix/a", lineUnpublished: true }).allow).toBe(true);
+  });
+  it("fix/는 -end 뒤 develop이 들어왔으면 거부", () => {
+    expect(g({ headRef: "fix/a", lineUnpublished: true, developSinceEnd: () => true }).allow).toBe(false);
+  });
+  it("fix/는 줄기 버전이 공개됐으면 거부", () => {
+    expect(g({ headRef: "fix/a", lineUnpublished: false }).allow).toBe(false);
+  });
+  it("fix/에 develop에만 있는 커밋이 있으면 거부", () => {
+    expect(g({ state: "testing", headRef: "fix/a", hasDevelopOnlyCommits: true }).allow).toBe(false);
   });
   it("hotfix/는 그 가지의 -end가 있을 때만, 상태 무관", () => {
-    expect(g("testing", "hotfix/a", { hotfixEnded: true }).allow).toBe(true);
-    expect(g("released", "hotfix/a").allow).toBe(false);
+    expect(g({ headRef: "hotfix/a", hotfixEnded: true }).allow).toBe(true);
+    expect(g({ state: "testing", headRef: "hotfix/a" }).allow).toBe(false);
   });
   it("그 밖의 브랜치는 거부", () => {
-    expect(g("released", "feat/x").allow).toBe(false);
+    expect(g({ headRef: "feat/a" }).allow).toBe(false);
   });
 });
 
