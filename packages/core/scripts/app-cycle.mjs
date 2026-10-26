@@ -187,9 +187,14 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   // 핫픽스 가지에서는 main의 태그가 HEAD에서 보이지 않으므로 모든 태그도 따로 읽는다 (호출 전 fetch 필요)
   const allTags = sh("git", ["tag"]).split("\n").filter(Boolean);
   const releaseStates = readReleaseStates(repo);
-  const prHeadRefsOf = (sha) =>
-    sh("gh", ["api", `repos/${repo}/commits/${sha}/pulls`, "--jq", '.[] | select(.base.ref == "main") | .head.ref'])
-      .split("\n").filter(Boolean);
+  const prHeadRefsOf = (sha) => {
+    try {
+      return sh("gh", ["api", `repos/${repo}/commits/${sha}/pulls`, "--jq", '.[] | select(.base.ref == "main") | .head.ref'])
+        .split("\n").filter(Boolean);
+    } catch (e) {
+      return die(`PR 조회 실패 (${sha}): ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
   // endCommit..tip 사이 커밋에 fix/가 아닌 PR의 커밋이 있는가
   const developSinceEndFrom = (tip) => (endCommit) =>
     classifyDevelopSinceEnd(sh("git", ["rev-list", `${endCommit}..${tip}`]).split("\n").filter(Boolean), prHeadRefsOf);
