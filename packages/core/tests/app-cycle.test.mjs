@@ -146,6 +146,29 @@ describe("decide — 핫픽스", () => {
     expect(r).toMatchObject({ stage: "start", version: "1.5.1", buildTag: "1.5.1.50-start", fromRef: "1.5.0" });
   });
 
+  it("공개 전 main 버전(1.4.1)과 겹치지 않게 1.4.2로 시작한다", () => {
+    const r = decide(base({
+      ref: "hotfix/a",
+      tags: ["1.4.0", "1.4.0.30-end"],
+      allTags: ["1.4.0", "1.4.0.30-end", "1.4.1.40-start", "1.4.1.41-end"],
+      releaseStates: { "1.4.0": "published", "1.4.1": "prerelease" },
+    }));
+    expect(r).toMatchObject({ stage: "start", version: "1.4.2", buildTag: "1.4.2.50-start" });
+  });
+
+  it("자기 가지의 태그 때문에 버전이 밀리지 않는다", () => {
+    const own = ["1.4.0", "1.4.0.30-end", "1.4.2.50-start"];
+    const r = decide(base({
+      ref: "hotfix/a",
+      head: "H2",
+      tags: own,
+      allTags: [...own, "1.4.1.40-start", "1.4.1.41-end"],
+      releaseStates: { "1.4.0": "published", "1.4.1": "prerelease" },
+      commitOf: (t) => ({ "1.4.2.50-start": "H" })[t] ?? "R",
+    }));
+    expect(r).toMatchObject({ stage: "mid", version: "1.4.2" });
+  });
+
   it("핫픽스에서 버전 올림을 고르면 실패", () => {
     const r = decide(base({ ref: "hotfix/x", bump: "minor" }));
     expect(r.stage).toBe("fail");

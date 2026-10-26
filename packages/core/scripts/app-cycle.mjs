@@ -17,13 +17,27 @@ function latestPublishedBelow(releases, releaseStates, version) {
   );
 }
 
-// 줄기 버전: main은 도달 가능한 빌드 태그 중 가장 높은 버전(없으면 최신 공개 릴리즈),
-// hotfix/*는 최신 공개 릴리즈 + patch. 핫픽스가 main에 머지돼도 열린 상위 버전 사이클을 놓치지 않는다.
-function lineVersion({ isHotfix, releases, builds, releaseStates }) {
+// main 줄기 버전: 도달 가능한 빌드 태그 중 가장 높은 버전(없으면 최신 공개 릴리즈).
+// 핫픽스가 main에 머지돼도 열린 상위 버전 사이클을 놓치지 않는다. 핫픽스 줄기는 hotfixVersion이 정한다
+function lineVersion({ releases, builds, releaseStates }) {
   const published = releases.filter((r) => releaseStates[r] === "published").sort(compareVersion);
-  if (isHotfix) return published.length ? bumpVersion(published.at(-1), "patch") : null;
   const versions = [...new Set(builds.map((b) => b.version))].sort(compareVersion);
   return versions.at(-1) ?? published.at(-1) ?? null;
+}
+
+// 핫픽스 버전: 최신 공개 + patch부터, 그 버전의 빌드 태그가 없거나 모두 이 가지(HEAD에서 도달)의 것인 첫 patch.
+// main의 공개 전 버전과 겹치지 않고, 자기 태그 때문에 계속 밀리지도 않는다
+export function hotfixVersion({ releases, releaseStates, mergedTags, allTags }) {
+  const published = releases.filter((r) => releaseStates[r] === "published").sort(compareVersion);
+  if (!published.length) return null;
+  const mine = new Set(mergedTags);
+  const all = parseTags(allTags).builds;
+  let v = bumpVersion(published.at(-1), "patch");
+  for (;;) {
+    const owned = all.filter((b) => b.version === v);
+    if (owned.every((b) => mine.has(b.tag))) return v;
+    v = bumpVersion(v, "patch");
+  }
 }
 
 export function decide({ ref, bump, complete, head, buildNumber, tags, allTags = tags, releaseStates, commitOf, developSinceEnd = () => false }) {
@@ -31,7 +45,10 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, allTags =
   if (!isHotfix && ref !== "main") return fail(`main 또는 hotfix/* 에서만 빌드할 수 있습니다: ${ref}`);
 
   const { releases, builds } = parseTags(tags);
-  const version = lineVersion({ isHotfix, releases, builds, releaseStates });
+  // 핫픽스 가지에서는 main의 태그가 보이지 않으므로 릴리즈·빌드 태그를 모든 태그에서 읽는다
+  const version = isHotfix
+    ? hotfixVersion({ releases: parseTags(allTags).releases, releaseStates, mergedTags: tags, allTags })
+    : lineVersion({ releases, builds, releaseStates });
   if (isHotfix && !version) return fail("핫픽스 기준이 될 출시 릴리즈가 없습니다");
   if (isHotfix && releaseStates[version] === "published")
     return fail(`${version}은 이미 출시됐습니다. 최신 출시 태그에서 새로 분기하세요`);
@@ -98,7 +115,7 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, allTags =
 // -end가 찍히면 공개 전이어도 다음 사이클을 열 수 있다
 export function mainState(tags, releaseStates) {
   const { releases, builds } = parseTags(tags);
-  const version = lineVersion({ isHotfix: false, releases, builds, releaseStates });
+  const version = lineVersion({ releases, builds, releaseStates });
   if (!version) return "closed";
   const last = sortBuilds(builds.filter((b) => b.version === version)).at(-1);
   return last && last.kind !== "end" ? "testing" : "closed";
