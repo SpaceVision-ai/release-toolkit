@@ -128,12 +128,14 @@ export function hotfixEndedAt(branchOnlyTags, headSha, commitOf) {
 }
 
 // -end 이후 main 커밋을 PR head 브랜치로 분류한다. 스쿼시·리베이스 머지도 허용되므로 머지 커밋 부모로는 판정하지 않는다.
-// prHeadRefsOf(sha) = 그 커밋이 들어간 main 대상 PR들의 head ref. PR이 없는 커밋(직접 push)은 develop으로 본다
+// prHeadRefsOf(sha) = 그 커밋이 들어간 main 대상 PR들의 head ref. PR이 없는 커밋(직접 push)은 develop으로 본다.
+// hotfix/는 이미 출시된 코드의 수정이라 재테스트에 실려도 되므로 develop으로 보지 않는다
+const NOT_DEVELOP = ["fix/", "hotfix/"];
 export function classifyDevelopSinceEnd(commits, prHeadRefsOf) {
-  return commits.some((c) => !prHeadRefsOf(c).some((ref) => ref.startsWith("fix/")));
+  return commits.some((c) => !prHeadRefsOf(c).some((ref) => NOT_DEVELOP.some((p) => ref.startsWith(p))));
 }
 
-// developSinceEnd: 줄기 버전의 마지막 -end 이후 main에 fix/가 아닌 PR의 커밋이 들어왔는가 (지연 평가)
+// developSinceEnd: 줄기 버전의 마지막 -end 이후 main에 fix/·hotfix/가 아닌 PR의 커밋이 들어왔는가 (지연 평가)
 export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded, lineUnpublished, developSinceEnd }) {
   const deny = (reason) => ({ allow: false, reason });
   if (headRef === "develop") {
@@ -195,7 +197,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       return die(`PR 조회 실패 (${sha}): ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  // endCommit..tip 사이 커밋에 fix/가 아닌 PR의 커밋이 있는가
+  // endCommit..tip 사이 커밋에 fix/·hotfix/가 아닌 PR의 커밋이 있는가
   const developSinceEndFrom = (tip) => (endCommit) =>
     classifyDevelopSinceEnd(sh("git", ["rev-list", `${endCommit}..${tip}`]).split("\n").filter(Boolean), prHeadRefsOf);
 
