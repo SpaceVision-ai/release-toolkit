@@ -84,14 +84,14 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, releaseSt
   return { stage: "end", ...common, buildTag: `${version}.${last.build}-end`, build: false, finalRef: lastCommit };
 }
 
-// main의 상태: testing(사이클 열림) / waiting(종료, 프리릴리즈) / released(공개 또는 태그 없음)
+// main의 상태: testing(사이클 열림) / closed(그 밖). 공개 여부는 출시 콘솔이 다룬다 —
+// -end가 찍히면 공개 전이어도 다음 사이클을 열 수 있다
 export function mainState(tags, releaseStates) {
   const { releases, builds } = parseTags(tags);
   const version = lineVersion({ isHotfix: false, releases, builds, releaseStates });
-  if (!version) return "released";
+  if (!version) return "closed";
   const last = sortBuilds(builds.filter((b) => b.version === version)).at(-1);
-  if (last && last.kind !== "end") return "testing";
-  return releaseStates[version] === "published" || !last ? "released" : "waiting";
+  return last && last.kind !== "end" ? "testing" : "closed";
 }
 
 // 핫픽스 가지의 -end 태그가 PR head 커밋을 그대로 가리킬 때만 종료로 본다.
@@ -100,17 +100,17 @@ export function hotfixEndedAt(branchOnlyTags, headSha, commitOf) {
   return parseTags(branchOnlyTags).builds.some((b) => b.kind === "end" && commitOf(b.tag) === headSha);
 }
 
-export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded }) {
+// developSinceEnd: 줄기 버전의 마지막 -end 이후 main에 fix/가 아닌 PR의 커밋이 들어왔는가 (지연 평가)
+export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded, lineUnpublished, developSinceEnd }) {
   const deny = (reason) => ({ allow: false, reason });
   if (headRef === "develop") {
-    return state === "released"
-      ? { allow: true }
-      : deny(state === "testing" ? "테스트 중에는 develop을 main에 머지할 수 없습니다" : "출시 확인 전에는 develop을 main에 머지할 수 없습니다");
+    return state === "testing" ? deny("테스트 중에는 develop을 main에 머지할 수 없습니다") : { allow: true };
   }
   if (headRef.startsWith("fix/")) {
-    if (state === "released") return deny("출시 완료 상태입니다. 수정은 develop으로 보내고, 출시본 수정은 hotfix/로 하세요");
     if (hasDevelopOnlyCommits) return deny("fix/는 main에서 분기해야 합니다 (develop에만 있는 커밋이 들어 있음)");
-    return { allow: true };
+    if (state === "testing") return { allow: true };
+    if (lineUnpublished && !developSinceEnd()) return { allow: true };
+    return deny("테스트가 닫혔습니다. 수정은 develop으로 보내고, 출시본 수정은 hotfix/로 하세요");
   }
   if (headRef.startsWith("hotfix/")) {
     return hotfixEnded ? { allow: true } : deny("핫픽스 사이클을 종료(-end)한 뒤에 머지하세요");
