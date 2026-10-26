@@ -248,4 +248,10 @@ describe("classifyDevelopSinceEnd", () => {
   it("커밋이 없으면 false", () => {
     expect(classifyDevelopSinceEnd([], () => ["develop"])).toBe(false);
   });
+  it("hotfix/ PR 커밋만 있으면 false — 출시된 코드의 수정은 develop이 아니다", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], () => ["hotfix/login"])).toBe(false);
+  });
+  it("hotfix/와 develop 커밋이 섞이면 true", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], (c) => (c === "a" ? ["hotfix/login"] : ["develop"]))).toBe(true);
+  });
 });
