@@ -127,6 +127,12 @@ export function hotfixEndedAt(branchOnlyTags, headSha, commitOf) {
   return parseTags(branchOnlyTags).builds.some((b) => b.kind === "end" && commitOf(b.tag) === headSha);
 }
 
+// -end 이후 main 커밋을 PR head 브랜치로 분류한다. 스쿼시·리베이스 머지도 허용되므로 머지 커밋 부모로는 판정하지 않는다.
+// prHeadRefsOf(sha) = 그 커밋이 들어간 main 대상 PR들의 head ref. PR이 없는 커밋(직접 push)은 develop으로 본다
+export function classifyDevelopSinceEnd(commits, prHeadRefsOf) {
+  return commits.some((c) => !prHeadRefsOf(c).some((ref) => ref.startsWith("fix/")));
+}
+
 // developSinceEnd: 줄기 버전의 마지막 -end 이후 main에 fix/가 아닌 PR의 커밋이 들어왔는가 (지연 평가)
 export function gate({ state, headRef, hasDevelopOnlyCommits, hotfixEnded, lineUnpublished, developSinceEnd }) {
   const deny = (reason) => ({ allow: false, reason });
@@ -178,7 +184,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     if (!/^[1-9]\d*$/.test(process.env.APP_BUILD_NUMBER ?? "")) die(`APP_BUILD_NUMBER가 양의 정수가 아닙니다: ${process.env.APP_BUILD_NUMBER ?? ""}`);
   }
   const tags = sh("git", ["tag", "--merged", "HEAD"]).split("\n").filter(Boolean);
+  // 핫픽스 가지에서는 main의 태그가 HEAD에서 보이지 않으므로 모든 태그도 따로 읽는다 (호출 전 fetch 필요)
+  const allTags = sh("git", ["tag"]).split("\n").filter(Boolean);
   const releaseStates = readReleaseStates(repo);
+  const prHeadRefsOf = (sha) =>
+    sh("gh", ["api", `repos/${repo}/commits/${sha}/pulls`, "--jq", '.[] | select(.base.ref == "main") | .head.ref'])
+      .split("\n").filter(Boolean);
+  // endCommit..tip 사이 커밋에 fix/가 아닌 PR의 커밋이 있는가
+  const developSinceEndFrom = (tip) => (endCommit) =>
+    classifyDevelopSinceEnd(sh("git", ["rev-list", `${endCommit}..${tip}`]).split("\n").filter(Boolean), prHeadRefsOf);
 
   if (mode === "decide") {
     const result = decide({
@@ -188,8 +202,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       head: sh("git", ["rev-parse", "HEAD"]),
       buildNumber: Number(process.env.APP_BUILD_NUMBER),
       tags,
+      allTags,
       releaseStates,
       commitOf: (t) => sh("git", ["rev-list", "-n1", t]),
+      developSinceEnd: developSinceEndFrom("HEAD"),
     });
     if (result.stage === "fail") {
       console.log(`::error::${result.message}`);
@@ -212,11 +228,18 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     // pull_request 체크아웃의 HEAD는 머지 커밋이라, PR head SHA는 APP_HEAD_SHA로 받는다.
     const headSha = process.env.APP_HEAD_SHA || sh("git", ["rev-parse", "HEAD"]);
     const hotfixEnded = hotfixEndedAt(branchOnly, headSha, (t) => sh("git", ["rev-list", "-n1", t]));
+    // 줄기 버전이 -end로 닫혔고 공개 전이면 재테스트용 fix/를 받을 수 있다 (-end 뒤 develop이 없을 때만)
+    const mainBuilds = parseTags(mainTags).builds;
+    const lineV = [...new Set(mainBuilds.map((b) => b.version))].sort(compareVersion).at(-1) ?? null;
+    const lineLast = lineV ? sortBuilds(mainBuilds.filter((b) => b.version === lineV)).at(-1) : null;
+    const lineUnpublished = !!lineV && releaseStates[lineV] !== "published" && lineLast?.kind === "end";
     const result = gate({
       state: mainState(mainTags, releaseStates),
       headRef,
       hasDevelopOnlyCommits: prCommits.some((c) => developOnly.includes(c)),
       hotfixEnded,
+      lineUnpublished,
+      developSinceEnd: () => developSinceEndFrom("origin/main")(sh("git", ["rev-list", "-n1", lineLast.tag])),
     });
     if (!result.allow) {
       console.log(`::error::${result.reason}`);
