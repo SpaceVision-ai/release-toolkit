@@ -6,6 +6,7 @@ import { parseCommits, readCommitLines, recommendBump } from "./app-release-note
 import { bumpVersion, compareVersion, parseTags, sortBuilds } from "./app-version.mjs";
 
 const fail = (message) => ({ stage: "fail", message });
+const hasBuildTags = (tags, version) => parseTags(tags).builds.some((b) => b.version === version);
 
 function latestPublishedBelow(releases, releaseStates, version) {
   return (
@@ -25,7 +26,7 @@ function lineVersion({ isHotfix, releases, builds, releaseStates }) {
   return versions.at(-1) ?? published.at(-1) ?? null;
 }
 
-export function decide({ ref, bump, complete, head, buildNumber, tags, releaseStates, commitOf }) {
+export function decide({ ref, bump, complete, head, buildNumber, tags, allTags = tags, releaseStates, commitOf, developSinceEnd = () => false }) {
   const isHotfix = ref.startsWith("hotfix/");
   if (!isHotfix && ref !== "main") return fail(`main 또는 hotfix/* 에서만 빌드할 수 있습니다: ${ref}`);
 
@@ -45,12 +46,21 @@ export function decide({ ref, bump, complete, head, buildNumber, tags, releaseSt
     if (isHotfix) {
       if (bump !== "skip") return fail("핫픽스는 버전을 자동으로 정합니다. 버전 올림은 skip으로 두세요");
       next = version;
-    } else if (version && line.length && releaseStates[version] !== "published") {
-      if (bump !== "skip") return fail(`${version}이 출시 대기 중입니다. 같은 버전으로 재테스트하려면 skip을 고르세요`);
+    } else if (bump === "skip") {
+      // 같은 버전 재테스트: 공개 전이고, 그 버전 -end 뒤 main에 develop이 들어오지 않았을 때만.
+      // 다음 버전 코드가 섞인 main으로 지난 번호를 다시 빌드하지 않게 한다
+      if (!version || !line.length || releaseStates[version] === "published") {
+        return fail(`${version ?? "직전 버전"}은 이미 출시됐습니다. 버전 올림을 고르세요`);
+      }
+      if (developSinceEnd(commitOf(last.tag))) {
+        return fail(`${version} 이후 develop이 머지돼 같은 버전으로 다시 테스트할 수 없습니다. 버전을 올리세요`);
+      }
       next = version;
     } else {
-      if (bump === "skip") return fail(`${version ?? "직전 버전"}은 이미 출시됐습니다. 버전 올림을 고르세요`);
+      // -end 뒤에는 공개 전이어도 버전을 올려 다음 테스트를 연다 (공개 여부는 출시 콘솔이 다룬다)
       next = bumpVersion(version ?? "0.0.0", bump);
+      // 아직 main에 머지되지 않은 핫픽스가 이미 그 번호로 빌드했을 수 있다
+      if (hasBuildTags(allTags, next)) return fail(`${next}은 이미 빌드된 버전입니다(핫픽스 등). 더 높게 올리세요`);
     }
     // 핫픽스가 main에 머지되기 전에 공개되면, main에서 올린 버전이 그 핫픽스 버전과 같아질 수 있다.
     if (releaseStates[next] === "published") return fail(`${next}은 이미 출시된 버전입니다. 더 높게 올리세요`);
