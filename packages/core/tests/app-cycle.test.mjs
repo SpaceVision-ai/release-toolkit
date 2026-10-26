@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide, gate, hotfixEndedAt, mainState } from "../scripts/app-cycle.mjs";
+import { classifyDevelopSinceEnd, decide, gate, hotfixEndedAt, mainState } from "../scripts/app-cycle.mjs";
 
 // 태그 → 커밋. head는 기본 "H".
 const base = (over = {}) => ({
@@ -232,5 +232,20 @@ describe("hotfixEndedAt", () => {
   });
   it("-end가 없으면 false", () => {
     expect(hotfixEndedAt(["1.5.1.53-start"], "A", commitOf)).toBe(false);
+  });
+});
+
+describe("classifyDevelopSinceEnd", () => {
+  it("모든 커밋이 main 대상 fix/ PR에서 왔으면 false", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], () => ["fix/x"])).toBe(false);
+  });
+  it("develop PR 커밋이 하나라도 있으면 true", () => {
+    expect(classifyDevelopSinceEnd(["a", "b"], (c) => (c === "b" ? ["develop"] : ["fix/x"]))).toBe(true);
+  });
+  it("PR이 연결되지 않은 커밋(직접 push)은 develop으로 본다", () => {
+    expect(classifyDevelopSinceEnd(["a"], () => [])).toBe(true);
+  });
+  it("커밋이 없으면 false", () => {
+    expect(classifyDevelopSinceEnd([], () => ["develop"])).toBe(false);
   });
 });
