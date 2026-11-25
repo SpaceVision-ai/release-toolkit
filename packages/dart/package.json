@@ -1,6 +1,6 @@
 {
   "name": "@spacevision-ai/release-toolkit-dart",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Dart/Flutter 레포용 릴리즈 자동화 — pubspec.yaml 범프 + build number adapter",
   "license": "UNLICENSED",
   "type": "module",
