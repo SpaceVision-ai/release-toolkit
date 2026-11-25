@@ -70,20 +70,19 @@ function backMerge(run, repo, version, ref) {
     }
     return "pr";
   }
-  run("git", ["fetch", "origin", "develop", "main"]);
-  run("git", ["checkout", "-B", "app-release-backmerge", "origin/develop"]);
+  // develop는 보호 규칙(required checks) 때문에 직접 push가 막힌다. 항상 PR로 올려
+  // 체크를 통과시킨 뒤 자동 병합되게 하고, 충돌이면 사람이 해소한다.
+  const branch = `chore/backmerge-${version}`;
+  run("git", ["fetch", "origin", "main"]);
+  // 다시 실행할 때 main이 움직였어도 거부되지 않게 강제로 맞춘다 (CI가 만든 임시 브랜치).
+  run("git", ["push", "origin", `+origin/main:refs/heads/${branch}`]);
+  createPr(run, ["-R", repo, "--base", "develop", "--head", branch, "--title", title, "--body", "테스트 종료 백머지 PR입니다. 체크를 통과하면 자동 병합되고, 충돌이 나면 수동으로 해소하세요."]);
   try {
-    run("git", ["merge", "--no-ff", "origin/main", "-m", title]);
-  } catch {
-    run("git", ["merge", "--abort"]);
-    const branch = `chore/backmerge-${version}`;
-    // 다시 실행할 때 main이 움직였어도 거부되지 않게 강제로 맞춘다 (CI가 만든 임시 브랜치).
-    run("git", ["push", "origin", `+origin/main:refs/heads/${branch}`]);
-    createPr(run, ["-R", repo, "--base", "develop", "--head", branch, "--title", title, "--body", "테스트 종료 백머지에서 충돌이 나 PR로 올립니다."]);
-    return "pr";
+    run("gh", ["pr", "merge", branch, "-R", repo, "--auto", "--merge"]);
+  } catch (err) {
+    console.warn(`자동 병합 설정 실패(수동 병합 필요): ${String(err.message ?? err)}`);
   }
-  run("git", ["push", "origin", "HEAD:develop"]);
-  return "pushed";
+  return "pr";
 }
 
 export function endRelease({ run, repo, version, startRef, finalRef, ref, writeFile }) {
