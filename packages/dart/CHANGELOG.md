@@ -1,5 +1,12 @@
 # @spacevision-ai/release-toolkit-dart
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [[`65e79a2`](https://github.com/SpaceVision-ai/release-toolkit/commit/65e79a24f0e06e1b8557f3d0b94aaa26f81e27f2)]:
+  - @spacevision-ai/release-toolkit-core@0.0.2
+
 ## 0.0.1
 
 ### Patch Changes

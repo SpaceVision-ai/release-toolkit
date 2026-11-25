@@ -85,20 +85,23 @@ describe("withFixes", () => {
 });
 
 describe("endRelease", () => {
-  it("태그를 최종 커밋에 찍고 프리릴리즈로 바꾸고 develop에 백머지한다", () => {
+  it("태그를 최종 커밋에 찍고 프리릴리즈로 바꾸고 develop 백머지 PR을 자동 병합으로 올린다", () => {
     const { run, calls } = fakeRun({
       "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":true,"isPrerelease":false}',
       "git log S..F": "",
       "git ls-remote": "",
     });
-    endRelease(ctx({ run }));
+    const result = endRelease(ctx({ run }));
     expect(calls).toEqual(expect.arrayContaining([
       "git tag -f 1.5.0 F",
       "git push origin refs/tags/1.5.0",
       "gh api -X PATCH repos/o/r/releases/7 -f tag_name=1.5.0 -f target_commitish=F -F draft=false -F prerelease=true -F body=@/tmp/body.md",
-      "git merge --no-ff origin/main -m chore: main 백머지 (1.5.0)",
-      "git push origin HEAD:develop",
+      "git push origin +origin/main:refs/heads/chore/backmerge-1.5.0",
+      "gh pr create -R o/r --base develop --head chore/backmerge-1.5.0 --title chore: main 백머지 (1.5.0) --body 테스트 종료 백머지 PR입니다. 체크를 통과하면 자동 병합되고, 충돌이 나면 수동으로 해소하세요.",
+      "gh pr merge chore/backmerge-1.5.0 -R o/r --auto --merge",
     ]));
+    expect(calls).not.toContain("git push origin HEAD:develop");
+    expect(result.backMerge).toBe("pr");
   });
 
   it("재테스트라 원격 태그가 이미 있으면 먼저 지운다", () => {
@@ -112,15 +115,13 @@ describe("endRelease", () => {
     );
   });
 
-  it("백머지가 충돌하면 중단하고 PR을 만든다", () => {
+  it("자동 병합 설정이 실패해도 PR은 남기고 릴리즈를 끝낸다", () => {
     const { run, calls } = fakeRun({
       "gh api repos/o/r/releases --paginate": '{"id":7,"body":"요약","isDraft":true,"isPrerelease":false}',
-      "git merge --no-ff": new Error("CONFLICT"),
+      "gh pr merge": new Error("Auto-merge is not allowed for this repository"),
     });
     const result = endRelease(ctx({ run }));
-    expect(calls).toContain("git merge --abort");
-    expect(calls).toContain("git push origin +origin/main:refs/heads/chore/backmerge-1.5.0");
-    expect(calls).toContain("gh pr create -R o/r --base develop --head chore/backmerge-1.5.0 --title chore: main 백머지 (1.5.0) --body 테스트 종료 백머지에서 충돌이 나 PR로 올립니다.");
+    expect(calls).toContain("gh pr create -R o/r --base develop --head chore/backmerge-1.5.0 --title chore: main 백머지 (1.5.0) --body 테스트 종료 백머지 PR입니다. 체크를 통과하면 자동 병합되고, 충돌이 나면 수동으로 해소하세요.");
     expect(result.backMerge).toBe("pr");
   });
 
